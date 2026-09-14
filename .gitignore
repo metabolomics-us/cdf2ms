@@ -1,0 +1,8 @@
+bin/
+dist/
+*.test
+/tmp/
+.DS_Store
+coverage.out
+.testbin/
+node_modules/
