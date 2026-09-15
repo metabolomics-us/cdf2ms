@@ -1,8 +1,8 @@
 bin/
 dist/
-*.test
-/tmp/
+*.partial
+*.writing
+__pycache__/
+*.pyc
 .DS_Store
-coverage.out
-.testbin/
-node_modules/
+*.test
