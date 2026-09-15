@@ -84,6 +84,8 @@ const (
 	CodeMZMLValidationFailed  Code = "MZML_VALIDATION_FAILED"
 	CodeMZXMLValidationFailed Code = "MZXML_VALIDATION_FAILED"
 	CodeNumericMismatch       Code = "NUMERIC_MISMATCH"
+	CodeNumericPrecisionLoss  Code = "NUMERIC_PRECISION_LOSS"
+	CodeCountMismatch         Code = "COUNT_MISMATCH"
 	CodeReportWriteFailed     Code = "REPORT_WRITE_FAILED"
 	CodeDiscoveryFailed       Code = "DISCOVERY_FAILED"
 	CodeCollision             Code = "OUTPUT_NAME_COLLISION"
