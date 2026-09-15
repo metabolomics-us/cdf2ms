@@ -80,6 +80,8 @@ type Stats struct {
 	F64Arrays     int
 	CompressedArr int
 	Bytes         int64
+	// DroppedWarnings counts warnings beyond the retained cap.
+	DroppedWarnings int
 	// Warnings carries writer-level diagnostic codes raised during Write.
 	Warnings []msdata.Diagnostic
 }
@@ -92,6 +94,9 @@ type Stats struct {
 // opening tag. A mismatch is an error and the file is renamed to *.partial,
 // because a document whose @count disagrees with its content silently misleads
 // every downstream tool.
+// Writer implements msdata.SpectrumWriter.
+var _ msdata.SpectrumWriter = (*Writer)(nil)
+
 type Writer struct {
 	path     string
 	tmp      string
@@ -154,6 +159,24 @@ func Create(path string, run *msdata.Run, src msdata.SourceFile, opts Options) (
 
 // Stats returns the writer counters.
 func (w *Writer) Stats() Stats { return w.stats }
+
+// Summary reports the write in format-neutral terms for batch reports and
+// provenance records.
+func (w *Writer) Summary() msdata.WriteSummary {
+	return msdata.WriteSummary{
+		Format:       "mzML",
+		Version:      "1.1.0",
+		Path:         w.path,
+		Bytes:        int64(w.stats.Bytes),
+		Spectra:      int64(w.stats.Spectra),
+		Points:       w.stats.Points,
+		Compressed:   w.stats.CompressedArr > 0,
+		F32Arrays:    w.stats.F32Arrays,
+		F64Arrays:    w.stats.F64Arrays,
+		SourceSHA256: w.src.SHA256,
+		Warnings:     w.stats.Warnings,
+	}
+}
 
 func (w *Writer) writeHeader() error {
 	b := w.bw
@@ -595,8 +618,21 @@ func (w *Writer) Abort() error {
 	return os.Remove(w.tmp)
 }
 
+// recordWarning keeps writer diagnostics bounded: a pathological file must not
+// turn per-spectrum warnings into unbounded memory growth. The first 64 are
+// kept verbatim; the count of the rest is reported once.
 func (w *Writer) recordWarning(d msdata.Diagnostic) {
-	w.stats.Warnings = append(w.stats.Warnings, d)
+	if len(w.stats.Warnings) < 64 {
+		w.stats.Warnings = append(w.stats.Warnings, d)
+		return
+	}
+	if w.stats.DroppedWarnings == 0 {
+		w.stats.Warnings = append(w.stats.Warnings, msdata.Diagnostic{
+			Code:    msdata.CodeDiagnosticsTruncated,
+			Message: "further writer warnings suppressed",
+		})
+	}
+	w.stats.DroppedWarnings++
 }
 
 // ---- helpers ----
@@ -731,8 +767,11 @@ func fileLocation(src msdata.SourceFile) string {
 
 func spectrumID(sp *msdata.Spectrum) string {
 	// The schema requires the native ID shape "key=value [key=value...]".
+	// index= is always present so IDs stay unique and ordered even when the
+	// source numbers are absent, duplicated, or zero-based (some vendors number
+	// scans from 0); the vendor scan number rides along when it was reported.
 	if sp.ScanNumber != nil {
-		return "scan=" + strconv.FormatInt(*sp.ScanNumber, 10)
+		return "index=" + strconv.Itoa(sp.Index) + " scan=" + strconv.FormatInt(*sp.ScanNumber, 10)
 	}
 	return "index=" + strconv.Itoa(sp.Index)
 }

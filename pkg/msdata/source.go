@@ -51,51 +51,42 @@ func (s *Spectrum) Clone() *Spectrum {
 	return &out
 }
 
-// WriteHint carries information a writer needs before the first spectrum.
-type WriteHint struct {
-	// ScanCount must be the exact number of spectra that will be written.
-	// mzML's spectrumList/@count and mzXML's msRun/@scanCount are required
-	// attributes that precede the payload, so a wrong value is a hard error at
-	// Finish time rather than a silently invalid document.
-	ScanCount int
-
-	// PointCountTotal is advisory (used for mzXML numTuples-style summaries).
-	PointCountTotal int64
-
-	// SourceChecksumSHA256 is embedded as provenance when available.
-	SourceChecksumSHA256 string
-}
-
-// SpectrumWriter writes a normalized run to a target format.
+// SpectrumWriter streams normalized spectra into one output document.
 //
-// The writer receives an already-buffered, seekable-free io.Writer: writers
-// must stream and must not require rewinding.
+// mzml.Writer and mzxml.Writer both satisfy it. A writer owns its output file:
+// it writes to a temporary path and publishes the final path only once the
+// document is complete and internally consistent.
 type SpectrumWriter interface {
-	// Begin writes the document header.
-	Begin(ctx context.Context, run *Run, hint WriteHint) error
+	// Write appends one spectrum. Spectra must arrive with increasing Index.
+	Write(s *Spectrum) error
 
-	// WriteSpectrum appends one spectrum.
-	WriteSpectrum(ctx context.Context, s *Spectrum) error
+	// Close flushes trailers (indexes, checksums) and verifies that the number
+	// of spectra actually written matches the count the document header
+	// declared. A mismatch returns an ErrCountMismatch-typed error and leaves
+	// the artifact at <path>.partial instead of publishing it.
+	Close() error
 
-	// Finish flushes trailers (indexes, checksums) and returns the result.
-	// It must return an error if the number of written spectra differs from
-	// hint.ScanCount.
-	Finish(ctx context.Context) (Result, error)
-
-	// Abort discards any pending state. The caller is responsible for removing
-	// the temporary file.
+	// Abort discards pending state and removes the partial artifact.
 	Abort() error
+
+	// Summary reports what was produced, for reports and provenance.
+	Summary() WriteSummary
 }
 
-// Result describes a completed write.
-type Result struct {
-	Format      string            `json:"format"`
-	Version     string            `json:"version"`
-	Bytes       int64             `json:"bytes"`
-	Spectra     int64             `json:"spectra"`
-	Points      int64             `json:"points"`
-	Indexed     bool              `json:"indexed"`
-	Compressed  bool              `json:"compressed"`
-	SHA1Payload string            `json:"sha1_payload,omitempty"`
-	Checksums   map[string]string `json:"checksums,omitempty"`
+// WriteSummary is the format-neutral result of writing one document.
+type WriteSummary struct {
+	Format       string       `json:"format"`
+	Version      string       `json:"version"`
+	Path         string       `json:"path"`
+	Bytes        int64        `json:"bytes"`
+	Spectra      int64        `json:"spectra"`
+	Points       int64        `json:"points"`
+	Indexed      bool         `json:"indexed,omitempty"`
+	Compressed   bool         `json:"compressed,omitempty"`
+	F32Arrays    int          `json:"f32Arrays"`
+	F64Arrays    int          `json:"f64Arrays"`
+	EmptySpectra int          `json:"emptySpectra,omitempty"`
+	SourceSHA1   string       `json:"sourceSha1,omitempty"`
+	SourceSHA256 string       `json:"sourceSha256,omitempty"`
+	Warnings     []Diagnostic `json:"warnings,omitempty"`
 }

@@ -161,10 +161,14 @@ func (m Metadata) SortedKeys() []string {
 
 // SourceFile identifies the physical input file behind a Run.
 type SourceFile struct {
-	Path     string
-	Name     string
-	Size     int64
-	SHA256   string
+	Path   string
+	Name   string
+	Size   int64
+	SHA256 string
+	// SHA1 is the SHA-1 hex digest of the source file. mzXML requires it
+	// (parentFile/@fileSha1, exactly 40 characters), so converters compute it
+	// alongside SHA256 in one pass.
+	SHA1     string
 	Encoding string // e.g. "CDF-1 (classic)", "CDF-2 (64-bit offset)", "HDF5/NetCDF4"
 	Magic    string // hex first-4-bytes, useful for corruption triage
 }

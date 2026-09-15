@@ -83,13 +83,26 @@ const (
 	CodeOutputRenameFailed    Code = "OUTPUT_RENAME_FAILED"
 	CodeMZMLValidationFailed  Code = "MZML_VALIDATION_FAILED"
 	CodeMZXMLValidationFailed Code = "MZXML_VALIDATION_FAILED"
-	CodeNumericMismatch       Code = "NUMERIC_MISMATCH"
-	CodeNumericPrecisionLoss  Code = "NUMERIC_PRECISION_LOSS"
-	CodeCountMismatch         Code = "COUNT_MISMATCH"
-	CodeReportWriteFailed     Code = "REPORT_WRITE_FAILED"
-	CodeDiscoveryFailed       Code = "DISCOVERY_FAILED"
-	CodeCollision             Code = "OUTPUT_NAME_COLLISION"
-	CodeCancelled             Code = "CANCELLED"
+	// CodeMZXMLInstrumentUnreported marks a source that states nothing about the
+	// instrument, so <msInstrument> is omitted (mzXML requires every component
+	// whenever the element is present).
+	CodeMZXMLInstrumentUnreported Code = "MZXML_INSTRUMENT_UNREPORTED"
+	// CodeMZXMLInstrumentPlaceholder marks an instrument component written as the
+	// literal "Unknown" because mzXML has no way to express absence.
+	CodeMZXMLInstrumentPlaceholder Code = "MZXML_INSTRUMENT_PLACEHOLDER"
+	// CodeDiagnosticsTruncated marks that further diagnostics of a kind were
+	// suppressed to keep memory bounded; the count is reported separately.
+	CodeDiagnosticsTruncated Code = "DIAGNOSTICS_TRUNCATED"
+	// CodeMZXMLScanNumberFallback marks scan/@num falling back to 1-based ordinals
+	// because source scan numbers were absent, non-positive, or unordered.
+	CodeMZXMLScanNumberFallback Code = "MZXML_SCAN_NUMBER_FALLBACK"
+	CodeNumericMismatch         Code = "NUMERIC_MISMATCH"
+	CodeNumericPrecisionLoss    Code = "NUMERIC_PRECISION_LOSS"
+	CodeCountMismatch           Code = "COUNT_MISMATCH"
+	CodeReportWriteFailed       Code = "REPORT_WRITE_FAILED"
+	CodeDiscoveryFailed         Code = "DISCOVERY_FAILED"
+	CodeCollision               Code = "OUTPUT_NAME_COLLISION"
+	CodeCancelled               Code = "CANCELLED"
 )
 
 // Severity classifies a Diagnostics entry.
@@ -224,6 +237,38 @@ func (e *TypedError) Error() string {
 
 // Unwrap implements errors.Unwrap.
 func (e *TypedError) Unwrap() error { return e.Err }
+
+// sentinelByCode pairs machine-readable codes with the sentinel category they
+// belong to, so errors.Is(err, ErrCountMismatch) matches a TypedError carrying
+// the paired CodeCountMismatch. Codes not listed here only match their wrapped
+// cause.
+var sentinelByCode = map[Code]error{
+	CodeCountMismatch:          ErrCountMismatch,
+	CodeNumericMismatch:        ErrNumericMismatch,
+	CodeMZMLValidationFailed:   ErrValidationFailed,
+	CodeMZXMLValidationFailed:  ErrValidationFailed,
+	CodeCancelled:              ErrCancelled,
+	CodeCollision:              ErrOutputCollision,
+	CodeSourceTooLarge:         ErrFileTooLarge,
+	CodeNCUnsupportedEncoding:  ErrSourceUnsupported,
+	CodeNCVarNotFound:          ErrSourceUnsupported,
+	CodeANDIRequiredVarMissing: ErrSourceUnsupported,
+	CodeANDIUnknownRTUnit:      ErrUnitUndetermined,
+	CodeANDIAmbiguousUnits:     ErrUnitUndetermined,
+	CodeNCHeaderCorrupt:        ErrCorruptSource,
+	CodeSourceTruncated:        ErrCorruptSource,
+	CodeANDIInvalidScanIndex:   ErrCorruptSource,
+	CodeANDIPointCountMismatch: ErrCorruptSource,
+}
+
+// Is reports whether this typed error belongs to the sentinel category paired
+// with its code, in addition to matching its wrapped cause.
+func (e *TypedError) Is(target error) bool {
+	if s, ok := sentinelByCode[e.Code]; ok && s == target {
+		return true
+	}
+	return e.Err != nil && errors.Is(e.Err, target)
+}
 
 // CodeOf extracts a Code from an error chain, or "" when unclassified.
 func CodeOf(err error) Code {
