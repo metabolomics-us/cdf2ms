@@ -9,6 +9,37 @@ import (
 // consumed. It is a normal terminator, not a failure.
 var ErrEndOfData = errors.New("msdata: end of spectra")
 
+// Sentinel error categories. They classify *why* something failed so callers can
+// branch (retry vs. reject vs. ask the operator) without matching message text.
+// Every sentinel is paired with a Code above for machine-readable reporting.
+var (
+	// ErrSourceUnsupported marks a file that cdf2ms cannot convert at all (not
+	// ANDI/MS, missing peak arrays, no way to partition peaks into spectra).
+	ErrSourceUnsupported = errors.New("cdf2ms: source is not convertible")
+	// ErrCorruptSource marks a file whose structure contradicts its own header.
+	ErrCorruptSource = errors.New("cdf2ms: source is corrupt")
+	// ErrFileTooLarge marks a file that exceeds an explicit resource limit.
+	ErrFileTooLarge = errors.New("cdf2ms: source exceeds configured limits")
+	// ErrUnitUndetermined marks an retention-time unit that could not be
+	// established without guessing; it always names an operator action.
+	ErrUnitUndetermined = errors.New("cdf2ms: retention-time unit undetermined")
+	// ErrNumericMismatch marks a read-back value that differs from the value
+	// that was written. It is always fatal: cdf2ms never ships numbers it
+	// cannot prove.
+	ErrNumericMismatch = errors.New("cdf2ms: numeric read-back mismatch")
+	// ErrValidationFailed marks output that failed schema or structural
+	// validation.
+	ErrValidationFailed = errors.New("cdf2ms: output validation failed")
+	// ErrCountMismatch marks a document whose spectrum count differs from the
+	// count its header promised.
+	ErrCountMismatch = errors.New("cdf2ms: spectrum count mismatch")
+	// ErrOutputCollision marks a destination that already exists and would be
+	// overwritten.
+	ErrOutputCollision = errors.New("cdf2ms: output already exists")
+	// ErrCancelled marks a run stopped by the user.
+	ErrCancelled = errors.New("cdf2ms: cancelled")
+)
+
 // Code is a stable, machine-readable error/warning code. Reports and downstream
 // automation must rely on these codes rather than on message text.
 type Code string
@@ -43,6 +74,8 @@ const (
 	CodeANDIScanIndexBase        Code = "ANDI_SCAN_INDEX_BASE_ASSUMED"
 	CodeANDIPackingApplied       Code = "ANDI_PACKING_APPLIED"
 	CodeANDIAmbiguousUnits       Code = "ANDI_AMBIGUOUS_UNITS"
+	CodeANDIUnitInferredFromMag  Code = "ANDI_UNIT_INFERRED_FROM_MAGNITUDE"
+	CodeANDIUsedPointTimeUnit    Code = "ANDI_USED_POINT_TIME_UNIT"
 
 	// Output problems.
 	CodeOutputWriteFailed     Code = "OUTPUT_WRITE_FAILED"

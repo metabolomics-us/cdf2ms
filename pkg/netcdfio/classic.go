@@ -642,7 +642,10 @@ func (f *File) parseHeader() error {
 				f.noteWarning(v.Name, v.VSize)
 			}
 		}
-		if v.Begin < 0 || v.Begin > f.fileSize {
+		// A record variable's begin points into the record block. With zero
+		// records the block is empty, so a begin at or just past EOF is legal and
+		// is exactly what netCDF itself writes for an empty file.
+		if v.Begin < 0 || (v.Begin > f.fileSize && !(v.IsRecord && f.NumRecs == 0)) {
 			return fmt.Errorf("%w: variable %q begins at %d, past end of file (%d)",
 				ErrCorruptHeader, v.Name, v.Begin, f.fileSize)
 		}

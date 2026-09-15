@@ -344,3 +344,28 @@ func IsFillFloat(t Type, v float64) bool {
 	}
 	return false
 }
+
+// RecordOffset returns the byte offset of the first record in the record data
+// block, i.e. the smallest begin among all record variables. It returns 0 when
+// the file has no record variables.
+func (f *File) RecordOffset() int64 {
+	off := int64(-1)
+	for _, name := range f.varOrder {
+		v := f.Vars[name]
+		if !v.IsRecord {
+			continue
+		}
+		if off < 0 || v.Begin < off {
+			off = v.Begin
+		}
+	}
+	if off < 0 {
+		return 0
+	}
+	return off
+}
+
+// ReadRaw performs a positional read through the same read-ahead cache used by
+// the typed readers. It exists so a caller can de-interleave a whole record
+// window with one syscall instead of one read per record.
+func (f *File) ReadRaw(off int64, p []byte) error { return f.readAt(off, p) }
