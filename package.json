@@ -1,0 +1,13 @@
+{
+  "name": "cdf2ms",
+  "private": true,
+  "version": "0.0.0",
+  "description": "cdf2ms: pure-Go ANDI/MS NetCDF → mzML/mzXML converter. These npm scripts are the engineering gate's discovery surface and delegate to the Makefile, which is the single source of truth for lint/test/build/verify.",
+  "scripts": {
+    "lint": "make lint",
+    "test": "make test",
+    "build": "make build",
+    "verify": "make verify",
+    "bench": "make bench"
+  }
+}
