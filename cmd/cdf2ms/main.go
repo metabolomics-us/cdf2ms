@@ -70,6 +70,8 @@ func run(ctx context.Context, args []string) int {
 		return cmdConvert(ctx, rest)
 	case "fixtures":
 		return cmdFixtures(ctx, rest)
+	case "report":
+		return cmdReport(rest)
 	case "version":
 		return cmdVersion(rest)
 	}
@@ -89,6 +91,7 @@ Usage:
                  [-max-source-bytes SIZE] [-verify] [-verify-tolerance X]
                  [-report-json PATH] [-json] PATH...
   cdf2ms fixtures DIR [-files N] [-scans N] [-points N] [-variant NAME]
+  cdf2ms report summarize FILE.jsonl   aggregate a conversion journal
   cdf2ms version
 
 Run 'cdf2ms COMMAND -h' for the flags of a single command.
