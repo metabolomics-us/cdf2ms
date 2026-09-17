@@ -56,8 +56,10 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash"
@@ -97,6 +99,13 @@ const (
 
 // Options configures a Writer.
 type Options struct {
+	// TempDir, when set, holds the scratch file that is renamed onto the final
+	// path. Empty keeps the scratch file beside the output, where the rename is
+	// atomic.
+	TempDir string
+	// HashOutput records the SHA-256 of the written document in the summary. The
+	// digest is computed as bytes leave the writer, so it costs no extra pass.
+	HashOutput bool
 	// Precision controls the binary array width.
 	Precision Precision
 	// Compress zlib-compresses the interleaved peak arrays.
@@ -121,12 +130,15 @@ type Options struct {
 
 // Stats counts what a Writer produced.
 type Stats struct {
-	Spectra    int
-	Points     int64
-	F32Arrays  int
-	F64Arrays  int
-	Compressed int
-	Empty      int
+	// OutputSHA256 is the digest of the document this writer produced, when the
+	// caller asked for one.
+	OutputSHA256 string
+	Spectra      int
+	Points       int64
+	F32Arrays    int
+	F64Arrays    int
+	Compressed   int
+	Empty        int
 	// Bytes is the size of the finished document.
 	Bytes int64
 	// Indexed reports whether a scan index was written.
@@ -164,6 +176,7 @@ type Writer struct {
 	tmp      string
 	fh       *os.File
 	bw       *bufio.Writer
+	hasher   *msdata.HashWriter
 	opts     Options
 	run      *msdata.Run
 	src      msdata.SourceFile
@@ -187,6 +200,9 @@ type Writer struct {
 	closed        bool
 }
 
+// SchemaVersion is the mzXML document version this writer emits.
+const SchemaVersion = "3.2"
+
 // Create opens path for writing and prepares the document prologue.
 //
 // The source SHA-1 required by <parentFile> is taken from src.SHA1 when present
@@ -206,29 +222,45 @@ func Create(path string, run *msdata.Run, src msdata.SourceFile, opts Options) (
 		opts.Timestamp = time.Now().UTC()
 	}
 	computeSHA1 := opts.ComputeSourceSHA1 == nil || *opts.ComputeSourceSHA1
-	if len(src.SHA1) != 40 && computeSHA1 {
+	if (len(src.SHA1) != 40 || src.SHA256 == "") && computeSHA1 {
 		if src.Path == "" {
 			return nil, msdata.WrapError(msdata.CodeMZXMLValidationFailed,
 				errors.New("source path is unknown"),
 				"mzxml: cannot compute the required parentFile/@fileSha1")
 		}
-		sum, err := fileSHA1(src.Path)
+		// One pass yields both digests: SHA-1 because the schema demands it,
+		// SHA-256 because reports and resume state key on it and a second pass
+		// over an 8 GB file is not free.
+		sha1hex, sha256hex, err := fileDigests(src.Path)
 		if err != nil {
 			return nil, msdata.WrapError(msdata.CodeMZXMLValidationFailed, err,
-				"mzxml: computing source SHA-1 for %s", src.Path)
+				"mzxml: computing source digests for %s", src.Path)
 		}
-		src.SHA1 = sum
+		if len(src.SHA1) != 40 {
+			src.SHA1 = sha1hex
+		}
+		if src.SHA256 == "" {
+			src.SHA256 = sha256hex
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("%w: mzxml: creating %s: %v", msdata.ErrValidationFailed, filepath.Dir(path), err)
 	}
-	tmp := path + ".writing"
+	tmp := msdata.TempPathFor(path, opts.TempDir)
 	fh, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, msdata.WrapError(msdata.CodeOutputWriteFailed, err, "creating %s", path)
 	}
+	// The hash sits between the buffered writer and the file so it sees every byte
+	// exactly once, including the index and checksum flushed during Close.
+	var sink io.Writer = fh
+	var hasher *msdata.HashWriter
+	if opts.HashOutput {
+		hasher = msdata.NewHashWriter(fh)
+		sink = hasher
+	}
 	w := &Writer{
-		path: path, tmp: tmp, fh: fh, bw: bufio.NewWriterSize(fh, 1<<20),
+		path: path, tmp: tmp, fh: fh, bw: bufio.NewWriterSize(sink, 1<<20), hasher: hasher,
 		opts: opts, run: run, src: src, declared: run.ScanCount,
 		sha: sha1.New(), hashing: true,
 	}
@@ -243,7 +275,7 @@ func (w *Writer) Stats() Stats { return w.stats }
 func (w *Writer) Summary() msdata.WriteSummary {
 	return msdata.WriteSummary{
 		Format:       "mzXML",
-		Version:      "3.2",
+		Version:      SchemaVersion,
 		Path:         w.path,
 		Bytes:        w.stats.Bytes,
 		Spectra:      int64(w.stats.Spectra),
@@ -255,6 +287,7 @@ func (w *Writer) Summary() msdata.WriteSummary {
 		EmptySpectra: w.stats.Empty,
 		SourceSHA1:   w.stats.SourceSHA1,
 		SourceSHA256: w.src.SHA256,
+		SHA256:       w.stats.OutputSHA256,
 		Warnings:     w.stats.Warnings,
 	}
 }
@@ -658,19 +691,21 @@ func (w *Writer) Close() error {
 	}
 	if w.stats.Spectra != w.declared {
 		rename := w.path + ".partial"
-		_ = os.Rename(w.tmp, rename)
+		_ = msdata.Promote(w.tmp, rename)
 		return msdata.WrapError(msdata.CodeCountMismatch,
 			fmt.Errorf("declared %d spectra, wrote %d", w.declared, w.stats.Spectra),
 			"%s: spectrum count mismatch; document kept at %s for inspection",
 			filepath.Base(w.path), filepath.Base(rename))
 	}
-	if err := os.Rename(w.tmp, w.path); err != nil {
-		return msdata.WrapError(msdata.CodeOutputRenameFailed, err, "renaming %s to %s", w.tmp, w.path)
+	digest := w.hasher.HexDigest()
+	if err := msdata.Promote(w.tmp, w.path); err != nil {
+		return msdata.WrapError(msdata.CodeOutputRenameFailed, err, "moving %s to %s", w.tmp, w.path)
 	}
 	if st, err := os.Stat(w.path); err == nil {
 		w.stats.Bytes = st.Size()
 	}
 	w.stats.Indexed = indexed
+	w.stats.OutputSHA256 = digest
 	return nil
 }
 
@@ -918,27 +953,30 @@ func countNonRepresentable(vals []float64) int {
 	return n
 }
 
-func fileSHA1(path string) (string, error) {
+// fileDigests hashes a file once and returns both hex digests.
+func fileDigests(path string) (sha1hex, sha256hex string, err error) {
 	fh, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer fh.Close()
 	buf := make([]byte, 1<<20)
-	h := sha1.New()
+	h1 := sha1.New()
+	h2 := sha256.New()
 	for {
 		n, rerr := fh.Read(buf)
 		if n > 0 {
-			h.Write(buf[:n])
+			h1.Write(buf[:n])
+			h2.Write(buf[:n])
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
 				break
 			}
-			return "", rerr
+			return "", "", rerr
 		}
 	}
-	return hexString(h.Sum(nil)), nil
+	return hexString(h1.Sum(nil)), hex.EncodeToString(h2.Sum(nil)), nil
 }
 
 func hexString(b []byte) string {

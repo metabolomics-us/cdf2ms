@@ -20,6 +20,9 @@ import (
 	"github.com/metabolomics-us/cdf2ms/pkg/msdata"
 )
 
+// SchemaVersion is the mzML document version this writer emits.
+const SchemaVersion = "1.1.0"
+
 // DefaultMSVersion is the PSI-MS ontology release this writer's term table was
 // verified against (psi-ms.obo "data-version"). scripts/fetch_psi_ms_cv.sh
 // updates it together with the test snapshot, so a document never claims a CV
@@ -49,6 +52,13 @@ const (
 
 // Options configures a Writer.
 type Options struct {
+	// TempDir, when set, holds the scratch file that is renamed onto the final
+	// path. Empty keeps the scratch file beside the output, where the rename is
+	// atomic.
+	TempDir string
+	// HashOutput records the SHA-256 of the written document in the summary. The
+	// digest is computed as bytes leave the writer, so it costs no extra pass.
+	HashOutput bool
 	// DocumentID is the mzML @id; defaults to the run ID.
 	DocumentID string
 	// Precision controls binary array width.
@@ -80,6 +90,9 @@ type Stats struct {
 	F64Arrays     int
 	CompressedArr int
 	Bytes         int64
+	// OutputSHA256 is the digest of the document this writer produced, when the
+	// caller asked for one.
+	OutputSHA256 string
 	// DroppedWarnings counts warnings beyond the retained cap.
 	DroppedWarnings int
 	// Warnings carries writer-level diagnostic codes raised during Write.
@@ -102,6 +115,7 @@ type Writer struct {
 	tmp      string
 	fh       *os.File
 	bw       *bufio.Writer
+	hasher   *msdata.HashWriter
 	opts     Options
 	run      *msdata.Run
 	src      msdata.SourceFile
@@ -138,13 +152,21 @@ func Create(path string, run *msdata.Run, src msdata.SourceFile, opts Options) (
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("%w: creating %s: %v", msdata.ErrValidationFailed, filepath.Dir(path), err)
 	}
-	tmp := path + ".writing"
+	tmp := msdata.TempPathFor(path, opts.TempDir)
 	fh, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, msdata.WrapError(msdata.CodeOutputWriteFailed, err, "creating %s", path)
 	}
+	// The hash has to sit between the buffered writer and the file so it sees
+	// every byte exactly once, including the bytes flushed during Close.
+	var sink io.Writer = fh
+	var hasher *msdata.HashWriter
+	if opts.HashOutput {
+		hasher = msdata.NewHashWriter(fh)
+		sink = hasher
+	}
 	w := &Writer{
-		path: path, tmp: tmp, fh: fh, bw: bufio.NewWriterSize(fh, 1<<20),
+		path: path, tmp: tmp, fh: fh, bw: bufio.NewWriterSize(sink, 1<<20), hasher: hasher,
 		opts: opts, run: run, src: src, declared: run.ScanCount, start: time.Now(),
 		swID: xmlID("cdf2ms"), icID: xmlID("IC_1"), dpID: xmlID("cdf2ms_processing"),
 		sfID: xmlID("source_file_1"),
@@ -165,7 +187,7 @@ func (w *Writer) Stats() Stats { return w.stats }
 func (w *Writer) Summary() msdata.WriteSummary {
 	return msdata.WriteSummary{
 		Format:       "mzML",
-		Version:      "1.1.0",
+		Version:      SchemaVersion,
 		Path:         w.path,
 		Bytes:        int64(w.stats.Bytes),
 		Spectra:      int64(w.stats.Spectra),
@@ -173,7 +195,9 @@ func (w *Writer) Summary() msdata.WriteSummary {
 		Compressed:   w.stats.CompressedArr > 0,
 		F32Arrays:    w.stats.F32Arrays,
 		F64Arrays:    w.stats.F64Arrays,
+		SourceSHA1:   w.src.SHA1,
 		SourceSHA256: w.src.SHA256,
+		SHA256:       w.stats.OutputSHA256,
 		Warnings:     w.stats.Warnings,
 	}
 }
@@ -183,8 +207,8 @@ func (w *Writer) writeHeader() error {
 	if _, err := b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n"); err != nil {
 		return err
 	}
-	fmt.Fprintf(b, `<mzML xmlns=%q xmlns:xsi=%q xsi:schemaLocation=%q id=%q version="1.1.0">`+"\n",
-		NamespaceURI, XSIURI, SchemaLocation, xmlAttr(w.opts.DocumentID))
+	fmt.Fprintf(b, `<mzML xmlns=%q xmlns:xsi=%q xsi:schemaLocation=%q id=%q version=%q>`+"\n",
+		NamespaceURI, XSIURI, SchemaLocation, xmlAttr(w.opts.DocumentID), SchemaVersion)
 
 	// cvList
 	contentTerms := []CVTerm{}
@@ -582,6 +606,12 @@ func (w *Writer) Close() error {
 		w.fh.Close()
 		return msdata.WrapError(msdata.CodeOutputWriteFailed, err, "flushing %s", w.path)
 	}
+	// The report must state what landed on disk; the temp file has the final size
+	// at this point because everything is flushed.
+	if st, err := w.fh.Stat(); err == nil {
+		w.stats.Bytes = st.Size()
+	}
+	w.stats.OutputSHA256 = w.hasher.HexDigest()
 	if err := w.fh.Sync(); err != nil {
 		w.fh.Close()
 		return msdata.WrapError(msdata.CodeOutputWriteFailed, err, "syncing %s", w.path)
@@ -597,8 +627,8 @@ func (w *Writer) Close() error {
 			"%s: spectrum count mismatch; document kept at %s for inspection",
 			filepath.Base(w.path), filepath.Base(rename))
 	}
-	if err := os.Rename(w.tmp, w.path); err != nil {
-		return msdata.WrapError(msdata.CodeOutputWriteFailed, err, "renaming %s to %s", w.tmp, w.path)
+	if err := msdata.Promote(w.tmp, w.path); err != nil {
+		return msdata.WrapError(msdata.CodeOutputRenameFailed, err, "moving %s to %s", w.tmp, w.path)
 	}
 	return nil
 }

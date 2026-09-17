@@ -326,3 +326,43 @@ func MassAt(scan, point int) float64 {
 func IntensityAt(scan, point int) float64 {
 	return float64((scan*7919+point*104729)%100000) * 1.5
 }
+
+// WriteANDI builds a synthetic ANDI/MS file and writes it to path.
+//
+// The default options are deliberately a plain, unambiguous GC/MS export: unit
+// declared in seconds, index and point counts present, instrument block included.
+// Callers override individual fields to reproduce the awkward variants found in
+// vendor corpora.
+func WriteANDI(path string, opt ANDIOptions) error {
+	if opt.ScanCount == 0 {
+		opt.ScanCount = 1
+	}
+	if len(opt.PointsPerScan) == 0 {
+		opt.PointsPerScan = []int{5}
+	}
+	if opt.RTUnit == "" {
+		opt.RTUnit = "second"
+	}
+	if opt.RTValueScale == 0 {
+		opt.RTValueScale = 1
+	}
+	if opt.GlobalAttributes == nil {
+		opt.GlobalAttributes = map[string]string{}
+	}
+	if _, ok := opt.GlobalAttributes["dataset_name"]; !ok {
+		name := path
+		for i := len(name) - 1; i >= 0; i-- {
+			if name[i] == '/' {
+				name = name[i+1:]
+				break
+			}
+		}
+		opt.GlobalAttributes["dataset_name"] = name
+	}
+	opt.IncludeInstrumentVars = true
+	spec, err := ANDI(opt)
+	if err != nil {
+		return err
+	}
+	return WriteNetCDF(path, spec)
+}

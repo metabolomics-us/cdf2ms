@@ -75,18 +75,22 @@ type SpectrumWriter interface {
 
 // WriteSummary is the format-neutral result of writing one document.
 type WriteSummary struct {
-	Format       string       `json:"format"`
-	Version      string       `json:"version"`
-	Path         string       `json:"path"`
-	Bytes        int64        `json:"bytes"`
-	Spectra      int64        `json:"spectra"`
-	Points       int64        `json:"points"`
-	Indexed      bool         `json:"indexed,omitempty"`
-	Compressed   bool         `json:"compressed,omitempty"`
-	F32Arrays    int          `json:"f32Arrays"`
-	F64Arrays    int          `json:"f64Arrays"`
-	EmptySpectra int          `json:"emptySpectra,omitempty"`
-	SourceSHA1   string       `json:"sourceSha1,omitempty"`
-	SourceSHA256 string       `json:"sourceSha256,omitempty"`
-	Warnings     []Diagnostic `json:"warnings,omitempty"`
+	Format       string `json:"format"`
+	Version      string `json:"version"`
+	Path         string `json:"path"`
+	Bytes        int64  `json:"bytes"`
+	Spectra      int64  `json:"spectra"`
+	Points       int64  `json:"points"`
+	Indexed      bool   `json:"indexed,omitempty"`
+	Compressed   bool   `json:"compressed,omitempty"`
+	F32Arrays    int    `json:"f32Arrays"`
+	F64Arrays    int    `json:"f64Arrays"`
+	EmptySpectra int    `json:"emptySpectra,omitempty"`
+	SourceSHA1   string `json:"sourceSha1,omitempty"`
+	SourceSHA256 string `json:"sourceSha256,omitempty"`
+	// SHA256 is the digest of the document that was written, computed while the
+	// bytes streamed out (so it costs no extra pass). Empty unless the writer was
+	// asked to hash its own output.
+	SHA256   string       `json:"sha256,omitempty"`
+	Warnings []Diagnostic `json:"warnings,omitempty"`
 }

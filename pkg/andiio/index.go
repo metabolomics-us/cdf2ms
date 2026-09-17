@@ -121,7 +121,7 @@ func DerivePlan(scanIndex, pointCount []int64, hasIndex, hasCount bool, totalPoi
 				p.Start[i] = int64(i)
 				p.Count[i] = 1
 			}
-			d.Warn(msdata.CodeANDIPointCountMismatch, 0,
+			d.Warn(msdata.CodeANDIScanLayoutAssumed, 0,
 				"neither scan_index nor point_count is present; assumed exactly one peak per scan "+
 					"because the peak arrays hold exactly %d values", totalPoints)
 			return p, nil
@@ -258,7 +258,7 @@ func (p *ScanPlan) fromIndexOnly(scanIndex []int64, totalPoints int64, d *msdata
 	}
 	p.Start[n-1] = last
 	p.Count[n-1] = int32(c)
-	d.WarnDetail(msdata.CodeANDIPointCountMismatch, 0, "point_count absent",
+	d.WarnDetail(msdata.CodeANDIPointCountDerived, 0, "point_count absent",
 		"point_count is absent; per-scan peak counts were derived from scan_index differences")
 	return nil
 }

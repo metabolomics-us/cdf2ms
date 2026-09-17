@@ -302,11 +302,13 @@ func TestReaderAmbiguousRTUnit(t *testing.T) {
 	if !errors.Is(err, msdata.ErrUnitUndetermined) {
 		t.Fatalf("err = %v, want ErrUnitUndetermined", err)
 	}
-	if msdata.CodeOf(err) != msdata.CodeANDIUnknownRTUnit {
-		t.Errorf("code = %s", msdata.CodeOf(err))
+	if msdata.CodeOf(err) != msdata.CodeANDIAmbiguousUnits {
+		t.Errorf("code = %s, want %s (undecidable units, not a malformed one)",
+			msdata.CodeOf(err), msdata.CodeANDIAmbiguousUnits)
 	}
-	// An explicit override must work and rescale.
-	r, err := Open(path, Options{RTUnit: RTPolicyMinutes, Plan: DefaultPlanOptions(), HeaderLimits: netcdfio.DefaultLimits()})
+	// An explicit override must work and rescale — including when the caller only
+	// sets RTUnit and leaves the other option groups at their zero value.
+	r, err := Open(path, Options{RTUnit: RTPolicyMinutes})
 	if err != nil {
 		t.Fatalf("open with override: %v", err)
 	}
@@ -365,7 +367,7 @@ func TestReaderIndexWarnings(t *testing.T) {
 		{"one_based_index", testutil.ANDIOptions{ScanCount: 6, PointsPerScan: []int{5, 9}, RTUnit: "Seconds",
 			ScanIndexBase: 1}, msdata.CodeANDIScanIndexBase},
 		{"derived_counts", testutil.ANDIOptions{ScanCount: 6, PointsPerScan: []int{5, 9}, RTUnit: "Seconds",
-			OmitPointCount: true}, msdata.CodeANDIPointCountMismatch},
+			OmitPointCount: true}, msdata.CodeANDIPointCountDerived},
 		{"prefix_sum", testutil.ANDIOptions{ScanCount: 6, PointsPerScan: []int{5, 9}, RTUnit: "Seconds",
 			OmitScanIndex: true}, ""},
 	}

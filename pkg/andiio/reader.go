@@ -2,6 +2,7 @@ package andiio
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -96,8 +97,16 @@ const auxBlockScans = 8192
 
 // Open opens an ANDI/MS netCDF file.
 func Open(path string, opts Options) (*Reader, error) {
+	// Fill defaults field by field. Replacing the struct wholesale would silently
+	// discard an explicit --rt-unit whenever the caller left HeaderLimits unset.
 	if opts.HeaderLimits.MaxVariables == 0 {
-		opts = DefaultOptions()
+		opts.HeaderLimits = netcdfio.DefaultLimits()
+	}
+	if opts.Plan.MaxScanPoints == 0 {
+		opts.Plan = DefaultPlanOptions()
+	}
+	if opts.RTUnit == "" {
+		opts.RTUnit = RTPolicyAuto
 	}
 	d := &msdata.Diagnostics{}
 	enc, magic, derr := netcdfio.Detect(path)
@@ -182,8 +191,15 @@ func (r *Reader) resolveRTUnit() error {
 	}
 	res, err := ResolveRTUnit(r.opts.RTUnit, r.layout.RT, tvUnits, sample)
 	if err != nil {
-		r.diag.Fail(msdata.CodeANDIUnknownRTUnit, 0, "%v", err)
-		return msdata.WrapError(msdata.CodeANDIUnknownRTUnit, err, "%s", r.src.Name)
+		// A units attribute we cannot read is a different problem from a file that
+		// states no usable unit at all: the first is malformed, the second merely
+		// undecidable, and the operator's next step differs.
+		code := msdata.CodeANDIUnknownRTUnit
+		if errors.Is(err, msdata.ErrUnitUndetermined) {
+			code = msdata.CodeANDIAmbiguousUnits
+		}
+		r.diag.Fail(code, 0, "%v", err)
+		return msdata.WrapError(code, err, "%s", r.src.Name)
 	}
 	for _, w := range res.Warnings {
 		r.diag.WarnDetail(w.Code, 0, w.Detail, "%s", w.Message)
@@ -659,30 +675,39 @@ func (r *Reader) ensureAux(i int) error {
 	return nil
 }
 
-// SourceChecksum computes the SHA-256 of the source file (streaming).
+// SourceChecksum returns the bare hex SHA-256 of a file, streamed in 1 MiB
+// blocks so a multi-gigabyte corpus file costs memory nothing.
 func SourceChecksum(path string) (string, error) {
-	return fileSHA256(path)
+	_, sum, err := SourceChecksums(path)
+	return sum, err
 }
 
-func fileSHA256(path string) (string, error) {
+// SourceChecksums returns the SHA-1 and SHA-256 of a file in a single pass.
+//
+// Both digests are needed by real consumers: mzXML requires a SHA-1 of the
+// source, while conversion reports and resume state key on SHA-256. Hashing the
+// file once instead of twice matters on 8 GB inputs.
+func SourceChecksums(path string) (sha1hex, sha256hex string, err error) {
 	fh, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer fh.Close()
 	buf := make([]byte, 1<<20)
-	h := sha256.New()
+	h1 := sha1.New()
+	h2 := sha256.New()
 	for {
 		n, rerr := fh.Read(buf)
 		if n > 0 {
-			h.Write(buf[:n])
+			h1.Write(buf[:n])
+			h2.Write(buf[:n])
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
 				break
 			}
-			return "", rerr
+			return "", "", rerr
 		}
 	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(h1.Sum(nil)), hex.EncodeToString(h2.Sum(nil)), nil
 }

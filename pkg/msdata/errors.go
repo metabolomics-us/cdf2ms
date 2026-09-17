@@ -33,6 +33,9 @@ var (
 	// ErrCountMismatch marks a document whose spectrum count differs from the
 	// count its header promised.
 	ErrCountMismatch = errors.New("cdf2ms: spectrum count mismatch")
+	// ErrWriteFailed means output bytes could not be written, flushed, or moved
+	// into place. Nothing partial is presented as a finished document.
+	ErrWriteFailed = errors.New("cdf2ms: output write failed")
 	// ErrOutputCollision marks a destination that already exists and would be
 	// overwritten.
 	ErrOutputCollision = errors.New("cdf2ms: output already exists")
@@ -56,9 +59,16 @@ const (
 	CodeSourceUnreadablePoints Code = "SOURCE_UNREADABLE_POINTS"
 
 	// ANDI mapping problems.
-	CodeANDIRequiredVarMissing   Code = "ANDI_REQUIRED_VARIABLE_MISSING"
-	CodeANDIInvalidScanIndex     Code = "ANDI_INVALID_SCAN_INDEX"
-	CodeANDIPointCountMismatch   Code = "ANDI_POINT_COUNT_MISMATCH"
+	CodeANDIRequiredVarMissing Code = "ANDI_REQUIRED_VARIABLE_MISSING"
+	CodeANDIInvalidScanIndex   Code = "ANDI_INVALID_SCAN_INDEX"
+	CodeANDIPointCountMismatch Code = "ANDI_POINT_COUNT_MISMATCH"
+	// CodeANDIPointCountDerived records that point_count is absent and per-scan
+	// peak counts were derived from scan_index. Nothing is wrong with the file;
+	// the reader simply had to compute what the file never stated.
+	CodeANDIPointCountDerived Code = "ANDI_POINT_COUNT_DERIVED"
+	// CodeANDIScanLayoutAssumed records that neither scan_index nor point_count
+	// exists and the one-peak-per-scan layout was assumed from the array extent.
+	CodeANDIScanLayoutAssumed    Code = "ANDI_SCAN_LAYOUT_ASSUMED"
 	CodeANDIUnknownRTUnit        Code = "ANDI_UNKNOWN_RT_UNIT"
 	CodeANDIMassIntensityLenMis  Code = "ANDI_MASS_INTENSITY_LENGTH_MISMATCH"
 	CodeANDIMissingRetentionTime Code = "ANDI_MISSING_RETENTION_TIME"
@@ -78,7 +88,15 @@ const (
 	CodeANDIUsedPointTimeUnit    Code = "ANDI_USED_POINT_TIME_UNIT"
 
 	// Output problems.
-	CodeOutputWriteFailed     Code = "OUTPUT_WRITE_FAILED"
+	CodeOutputWriteFailed Code = "OUTPUT_WRITE_FAILED"
+	// CodeFileNotFound marks a path the operator named that does not exist.
+	CodeFileNotFound Code = "FILE_NOT_FOUND"
+	// CodeInvalidOption marks operator input that cannot be honoured.
+	CodeInvalidOption Code = "INVALID_OPTION"
+	// CodeOpenFailed marks a source that could not be opened at all.
+	CodeOpenFailed Code = "OPEN_FAILED"
+	// CodeReadFailed marks an I/O failure while streaming a source.
+	CodeReadFailed            Code = "READ_FAILED"
 	CodeOutputTempFailed      Code = "OUTPUT_TEMP_FAILED"
 	CodeOutputRenameFailed    Code = "OUTPUT_RENAME_FAILED"
 	CodeMZMLValidationFailed  Code = "MZML_VALIDATION_FAILED"
@@ -103,6 +121,14 @@ const (
 	CodeDiscoveryFailed         Code = "DISCOVERY_FAILED"
 	CodeCollision               Code = "OUTPUT_NAME_COLLISION"
 	CodeCancelled               Code = "CANCELLED"
+	// CodeVerified records that an output was re-opened and matched the source.
+	CodeVerified Code = "OUTPUT_VERIFIED"
+	// CodeSkipResumed records that a file was skipped because an earlier run
+	// already produced (and reported) a matching output.
+	CodeSkipResumed Code = "SKIPPED_RESUMED"
+	// CodeFailFast records that a file was never started because an earlier file
+	// failed and the run was told to stop on the first failure.
+	CodeFailFast Code = "FAIL_FAST_ABORTED"
 )
 
 // Severity classifies a Diagnostics entry.
