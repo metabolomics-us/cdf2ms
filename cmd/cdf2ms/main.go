@@ -70,6 +70,10 @@ func run(ctx context.Context, args []string) int {
 		return cmdConvert(ctx, rest)
 	case "fixtures":
 		return cmdFixtures(ctx, rest)
+	case "validate":
+		return cmdValidate(ctx, rest)
+	case "verify-corpus":
+		return cmdVerifyCorpus(ctx, rest)
 	case "report":
 		return cmdReport(rest)
 	case "version":
@@ -91,6 +95,8 @@ Usage:
                  [-max-source-bytes SIZE] [-verify] [-verify-tolerance X]
                  [-report-json PATH] [-json] PATH...
   cdf2ms fixtures DIR [-files N] [-scans N] [-points N] [-variant NAME]
+  cdf2ms validate SOURCE.CDF OUT.mzML    independently verify one output
+  cdf2ms verify-corpus PATH... [flags]    convert into scratch, verify, summarize
   cdf2ms report summarize FILE.jsonl   aggregate a conversion journal
   cdf2ms version
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,9 @@ func cmdConvert(ctx context.Context, args []string) int {
 	quiet := fs.Bool("quiet", false, "suppress progress output")
 	failWarn := fs.Bool("fail-on-warning", false, "exit 4 when files convert but report warnings")
 	exts := fs.String("ext", ".cdf", "comma-separated source extensions for directory scans")
+	fileList := fs.String("file-list", "", "read the list of source files from this file (one path per line)")
+	shardIndex := fs.Int("shard-index", -1, "convert only files whose hash falls in this shard (requires -shard-count)")
+	shardCount := fs.Int("shard-count", 0, "number of shards for deterministic hash sharding")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -91,8 +95,24 @@ func cmdConvert(ctx context.Context, args []string) int {
 		return exitUsage
 	}
 	paths := fs.Args()
+	if *fileList != "" {
+		if len(paths) != 0 {
+			fmt.Fprintln(os.Stderr, "cdf2ms convert: -file-list cannot be combined with positional paths")
+			return exitUsage
+		}
+		list, err := readFileList(*fileList)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cdf2ms convert:", err)
+			return exitUsage
+		}
+		paths = list
+	}
 	if len(paths) == 0 {
 		fmt.Fprintln(os.Stderr, "cdf2ms convert: at least one file or directory is required")
+		return exitUsage
+	}
+	if (*shardIndex < 0) != (*shardCount == 0) {
+		fmt.Fprintln(os.Stderr, "cdf2ms convert: -shard-index and -shard-count must be given together")
 		return exitUsage
 	}
 	if len(formats.formats) == 0 {
@@ -195,6 +215,25 @@ func cmdConvert(ctx context.Context, args []string) int {
 			}
 		}
 	}
+	// Deterministic hash sharding: expand the paths to concrete files, then keep
+	// only those whose content-independent hash falls in the requested shard.
+	// Hashing the absolute path (not the discovery order) makes sharding stable
+	// across runs and machines, which is what Slurm array jobs need.
+	if *shardIndex >= 0 {
+		files, _, derr := convert.Discover(paths, opts)
+		if derr != nil {
+			fmt.Fprintln(os.Stderr, "cdf2ms convert:", derr)
+			return exitUsage
+		}
+		selected := make([]string, 0, len(files))
+		for _, f := range files {
+			if inShard(f, *shardIndex, *shardCount) {
+				selected = append(selected, f)
+			}
+		}
+		paths = selected
+	}
+
 	rep, err := convert.Run(ctx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cdf2ms convert:", err)
@@ -451,4 +490,35 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// readFileList reads one source path per line, skipping blanks and comments, so
+// an HPC scheduler can hand the tool an exact shard manifest.
+func readFileList(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, nil
+}
+
+// inShard reports whether a file falls in shard index of count, keyed by a
+// content-independent hash of its absolute path (FNV-1a 64). Hash-based sharding
+// is stable regardless of discovery order or machine, unlike index-based slicing.
+func inShard(path string, index, count int) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	h := fnv.New64a()
+	h.Write([]byte(abs))
+	return int(h.Sum64()%uint64(count)) == index
 }

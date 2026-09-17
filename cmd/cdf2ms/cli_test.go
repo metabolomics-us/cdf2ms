@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -161,4 +162,125 @@ func TestUnknownCommandAndUsage(t *testing.T) {
 	if code, _, _ := runCLI(t, "help"); code != 0 {
 		t.Fatalf("help should exit 0, got %d", code)
 	}
+}
+
+func TestValidateCommand(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCLI(t, "fixtures", "-variant", "plain", dir); code != 0 {
+		t.Fatalf("fixtures exit=%d", code)
+	}
+	src := filepath.Join(dir, "plain-01.cdf")
+	if code, _, _ := runCLI(t, "convert", "-overwrite", src); code != 0 {
+		t.Fatalf("convert exit=%d", code)
+	}
+	if code, out, _ := runCLI(t, "validate", src, filepath.Join(dir, "plain-01.mzML")); code != 0 {
+		t.Fatalf("validate mzML exit=%d\n%s", code, out)
+	}
+	if code, out, _ := runCLI(t, "validate", src, filepath.Join(dir, "plain-01.mzXML")); code != 0 {
+		t.Fatalf("validate mzXML exit=%d\n%s", code, out)
+	}
+	// A tampered output must fail validation.
+	if err := os.WriteFile(filepath.Join(dir, "plain-01.mzML"), []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, _ := runCLI(t, "validate", src, filepath.Join(dir, "plain-01.mzML")); code == 0 {
+		t.Fatalf("validate should fail on a tampered output")
+	}
+}
+
+func TestVerifyCorpusCommand(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCLI(t, "fixtures", "-variant", "plain,minutes", dir); code != 0 {
+		t.Fatalf("fixtures exit=%d", code)
+	}
+	scratch := filepath.Join(dir, "scratch")
+	if code, _, _ := runCLI(t, "verify-corpus", "-temp-dir", scratch, dir); code != 0 {
+		t.Fatalf("verify-corpus exit=%d", code)
+	}
+	// With -keep (default) outputs remain.
+	if n := countFiles(scratch); n != 4 { // 2 sources x 2 formats
+		t.Fatalf("verify-corpus keep produced %d outputs, want 4", n)
+	}
+	if code, _, _ := runCLI(t, "verify-corpus", "-temp-dir", scratch, "-delete", dir); code != 0 {
+		t.Fatalf("verify-corpus -delete exit=%d", code)
+	}
+	if n := countFiles(scratch); n != 0 {
+		t.Fatalf("verify-corpus -delete left %d outputs, want 0", n)
+	}
+}
+
+func TestConvertFileList(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCLI(t, "fixtures", "-variant", "plain,minutes", dir); code != 0 {
+		t.Fatalf("fixtures exit=%d", code)
+	}
+	list := filepath.Join(dir, "list.txt")
+	os.WriteFile(list, []byte("# corpus shard\n"+filepath.Join(dir, "plain-01.cdf")+"\n"), 0o644)
+	if code, _, _ := runCLI(t, "convert", "-file-list", list, "-out-dir", filepath.Join(dir, "out"), "-quiet"); code != 0 {
+		t.Fatalf("file-list convert exit=%d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "plain-01.mzML")); err != nil {
+		t.Errorf("file-list output missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "minutes-01.mzML")); err == nil {
+		t.Errorf("file-list should only convert listed file")
+	}
+}
+
+func TestConvertShardingIsDeterministic(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCLI(t, "fixtures", "-variant", "plain,cdf2,cdf5,packed,minutes", dir); code != 0 {
+		t.Fatalf("fixtures exit=%d", code)
+	}
+	shard := func(index int) []string {
+		out := filepath.Join(dir, "sh", "s"+string(rune('0'+index)))
+		if code, _, _ := runCLI(t, "convert", "-shard-index", strconv.Itoa(index), "-shard-count", "3",
+			"-out-dir", out, "-overwrite", "-quiet", dir); code != 0 {
+			t.Fatalf("shard %d convert exit=%d", index, code)
+		}
+		var names []string
+		filepath.WalkDir(out, func(p string, d os.DirEntry, e error) error {
+			if e != nil {
+				return nil
+			}
+			if !d.IsDir() {
+				names = append(names, filepath.Base(p))
+			}
+			return nil
+		})
+		return names
+	}
+	a := shard(1)
+	b := shard(1)
+	if len(a) != len(b) {
+		t.Fatalf("shard sizes differ: %v vs %v", a, b)
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("sharding not deterministic: %v vs %v", a, b)
+		}
+	}
+	// The union of all shards covers every source basename.
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		for _, n := range shard(i) {
+			seen[strings.TrimSuffix(n, filepath.Ext(n))] = true
+		}
+	}
+	for _, want := range []string{"plain-01", "cdf2-01", "cdf5-01", "packed-01", "minutes-01"} {
+		if !seen[want] {
+			t.Errorf("shards do not cover %s", want)
+		}
+	}
+}
+
+func countFiles(dir string) int {
+	n := 0
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, e error) error {
+		if !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return n
 }
