@@ -1,0 +1,88 @@
+name: CI
+
+# cdf2ms is pure Go and must stay CGO-free, so the default job builds and tests
+# exactly as it ships (CGO_ENABLED=0). The schema gate is a Python dev-time
+# check (lxml / netCDF4 / pyteomics) and is only run when the venv is present,
+# mirroring the local /tmp/msval setup; cdf2ms never shells out to Python at
+# runtime.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Lint (gofmt + vet + build)
+        run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Test all packages
+        run: make test
+      - name: End-to-end verify gate
+        run: make verify
+
+  real-corpus:
+    # The real vendor corpora are large and only fetched when explicitly enabled;
+    # normal PRs run the synthetic gate. Set CDF2MS_CORPUS to a URL or leave the
+    # cache dir empty to skip.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      CDF2MS_CORPUS: ${{ vars.CDF2MS_CORPUS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Run real-corpus tests
+        run: |
+          if [ -z "$CDF2MS_CORPUS" ]; then
+            echo "CDF2MS_CORPUS not set; skipping real-corpus tests"
+            exit 0
+          fi
+          CGO_ENABLED=0 go test -count=1 -tags corpus ./...
+
+  schema-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Set up Python validation env
+        run: |
+          python3 -m venv /tmp/msval
+          /tmp/msval/bin/pip install -q lxml netCDF4 numpy pyteomics
+      - name: Build CLI
+        run: CGO_ENABLED=0 go build -o /tmp/cdf2ms ./cmd/cdf2ms
+      - name: Convert fixtures and validate against official schemas
+        run: |
+          set -e
+          /tmp/cdf2ms fixtures -variant plain,minutes,cdf2,cdf5,packed /tmp/fx >/dev/null
+          /tmp/cdf2ms convert -overwrite -verify /tmp/fx >/dev/null
+          # mzXML validates against the committed official schema; mzML's XSD is
+          # fetched on first use by the script (same as the dev-time setup).
+          for f in /tmp/fx/*.mzXML; do
+            /tmp/msval/bin/python scripts/validate_ms_outputs.py "$f" --source "${f%.mzXML}.cdf"
+          done
+          for f in /tmp/fx/*.mzML; do
+            /tmp/msval/bin/python scripts/validate_ms_outputs.py "$f" --source "${f%.mzML}.cdf"
+          done
