@@ -20,6 +20,8 @@ make verify                  # end-to-end: fixtures → convert --verify → sum
 cdf2ms inspect  [flags] FILE...   describe the NetCDF container (inspection)
 cdf2ms audit    [flags] FILE...   ANDI conformance and convertibility audit
 cdf2ms convert  [flags] PATH...   convert files or directories (batch)
+cdf2ms validate SOURCE.CDF OUT    independently verify one output against the source
+cdf2ms verify-corpus PATH... [flags] convert into scratch, verify, summarize, delete
 cdf2ms fixtures DIR [flags]       write synthetic ANDI files for testing
 cdf2ms report summarize FILE.jsonl aggregate a conversion journal
 cdf2ms version                    print build information
@@ -35,8 +37,10 @@ cdf2ms inspect -globals -vars gc01_0812_066.cdf
 ```
 
 It reports container format (CDF-1/2/5, or HDF5/NetCDF4 which is described but not
-convertible), magic, size, record/dimension layout, global attributes, and
-variables. `-json` emits one object per file.
+convertible), magic, size, record/dimension layout, global attributes, variables,
+and — when the source is convertible — the ANDI-level summary: scan and point
+counts, retention-time range in seconds, m/z range, instrument, and the
+schema/vendor fingerprints. `-json` emits one object per file.
 
 ## Audit
 

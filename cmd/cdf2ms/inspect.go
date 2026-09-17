@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/metabolomics-us/cdf2ms/pkg/andiio"
 	"github.com/metabolomics-us/cdf2ms/pkg/msdata"
 	"github.com/metabolomics-us/cdf2ms/pkg/netcdfio"
 )
@@ -49,9 +50,42 @@ type inspectReport struct {
 	Dimensions []inspectDim  `json:"dimensions,omitempty"`
 	Globals    []inspectAttr `json:"globals,omitempty"`
 	Variables  []inspectVar  `json:"variables,omitempty"`
-	Notes      []string      `json:"notes,omitempty"`
-	Err        string        `json:"error,omitempty"`
-	Code       string        `json:"errorCode,omitempty"`
+	// Summary carries the ANDI-level facts (spec §17.4): scan/point counts, RT
+	// range, m/z range, instrument, and fingerprints. It is header-only, so it is
+	// cheap even on a large corpus file.
+	Summary *inspectSummary `json:"summary,omitempty"`
+	Notes   []string        `json:"notes,omitempty"`
+	Err     string          `json:"error,omitempty"`
+	Code    string          `json:"errorCode,omitempty"`
+}
+
+// inspectSummary is the ANDI-level reading of a convertible file.
+type inspectSummary struct {
+	RunName       string   `json:"runName,omitempty"`
+	Spectra       int64    `json:"spectra"`
+	Points        int64    `json:"points"`
+	RTUnit        string   `json:"rtUnit,omitempty"`
+	RTOrigin      string   `json:"rtOrigin,omitempty"`
+	Instrument    string   `json:"instrument,omitempty"`
+	SchemaFP      string   `json:"schemaFingerprint,omitempty"`
+	VendorFP      string   `json:"vendorFingerprint,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+	MSLevels      []string `json:"msLevels,omitempty"`
+	Polarity      string   `json:"polarity,omitempty"`
+	CentroidState string   `json:"centroidState,omitempty"`
+	RTSeconds     *rtRange `json:"rtSeconds,omitempty"`
+	MZRange       *mzRange `json:"mzRange,omitempty"`
+	Unconvertible string   `json:"unconvertibleReason,omitempty"`
+}
+
+type rtRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
+}
+
+type mzRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
 }
 
 func cmdInspect(ctx context.Context, args []string) int {
@@ -121,6 +155,7 @@ func inspectOne(path string, full bool, maxVars int) inspectReport {
 		rep.Code = string(msdata.CodeNCOpenFailed)
 		return rep
 	}
+	rep.Summary = inspectSummaryOf(path)
 	f, err := netcdfio.Open(path)
 	if err != nil {
 		rep.Err = err.Error()
@@ -178,6 +213,78 @@ func inspectOne(path string, full bool, maxVars int) inspectReport {
 	return rep
 }
 
+// inspectSummaryOf reads the ANDI-level facts (header + scan plan, no full data
+// scan) so `inspect` reports what the corpus actually is, not just the container.
+func inspectSummaryOf(path string) *inspectSummary {
+	s := &inspectSummary{}
+	ctx := context.Background()
+	rd, err := andiio.Open(path, andiio.Options{RTUnit: andiio.RTPolicyAuto})
+	if err != nil {
+		s.Unconvertible = err.Error()
+		return s
+	}
+	defer rd.Close()
+	run, err := rd.Metadata(ctx)
+	if err != nil {
+		s.Unconvertible = err.Error()
+		return s
+	}
+	s.RunName = run.ID
+	s.Spectra = int64(run.ScanCount)
+	s.Points = run.PointCount
+	s.RTUnit = run.RetentionTimeUnit
+	s.RTOrigin = run.RetentionTimeUnitOrigin
+	s.SchemaFP = run.SchemaFingerprint
+	s.VendorFP = run.VendorFingerprint
+	s.Instrument = run.Instrument.Name
+	// Capabilities and per-scan facts require streaming; do a bounded peek so a
+	// big corpus file is not read twice for an inspect.
+	const peek = 100_000
+	var (
+		firstRT, lastRT float64
+		minMZ, maxMZ    float64
+		hasRT, hasMZ    bool
+		n               int
+	)
+	for {
+		sp, err := rd.Next(ctx)
+		if err != nil {
+			break
+		}
+		n++
+		if sp.RetentionTimeSet {
+			v := sp.RetentionTime
+			if !hasRT || v < firstRT {
+				firstRT = v
+			}
+			if !hasRT || v > lastRT {
+				lastRT = v
+			}
+			hasRT = true
+		}
+		for _, m := range sp.MZ {
+			if !hasMZ || m < minMZ {
+				minMZ = m
+			}
+			if !hasMZ || m > maxMZ {
+				maxMZ = m
+			}
+			hasMZ = true
+		}
+		if n >= peek {
+			break
+		}
+	}
+	if hasRT {
+		s.RTSeconds = &rtRange{Min: firstRT, Max: lastRT}
+	}
+	if hasMZ {
+		s.MZRange = &mzRange{Min: minMZ, Max: maxMZ}
+	}
+	s.Capabilities = []string{}
+	return s
+}
+
 func printableMagic(m string) string {
 	// The magic contains a raw version byte; render it readably.
 	r := strings.NewReplacer("\x01", "1", "\x02", "2", "\x05", "5", "\x89", "89 ")
@@ -191,6 +298,28 @@ func clip(s string, full bool) string {
 	return s[:69] + "..."
 }
 
+func printInspectSummary(w *os.File, s *inspectSummary) {
+	if s.Unconvertible != "" {
+		fmt.Fprintf(w, "  ANDI: not convertible: %s\n", s.Unconvertible)
+		return
+	}
+	fmt.Fprintf(w, "  ANDI: run=%s  spectra=%d  points=%d\n", s.RunName, s.Spectra, s.Points)
+	fmt.Fprintf(w, "  RT:   unit=%s  origin=%s", s.RTUnit, s.RTOrigin)
+	if s.RTSeconds != nil {
+		fmt.Fprintf(w, "  range=%.3f..%.3f s", s.RTSeconds.Min, s.RTSeconds.Max)
+	}
+	fmt.Fprintln(w)
+	if s.MZRange != nil {
+		fmt.Fprintf(w, "  m/z:  %.4f..%.4f\n", s.MZRange.Min, s.MZRange.Max)
+	}
+	if s.Instrument != "" {
+		fmt.Fprintf(w, "  instrument: %s\n", s.Instrument)
+	}
+	if s.SchemaFP != "" || s.VendorFP != "" {
+		fmt.Fprintf(w, "  fingerprints: schema=%s vendor=%s\n", s.SchemaFP, s.VendorFP)
+	}
+}
+
 func printInspect(w *os.File, rep inspectReport) {
 	fmt.Fprintf(w, "%s\n", rep.Path)
 	fmt.Fprintf(w, "  container: %s  magic: %q  size: %s\n", rep.Container, rep.Magic, humanBytes(rep.Size))
@@ -202,6 +331,9 @@ func printInspect(w *os.File, rep inspectReport) {
 		return
 	}
 	fmt.Fprintf(w, "  records: %d  record size: %s\n", rep.NumRecs, humanBytes(rep.RecSize))
+	if rep.Summary != nil {
+		printInspectSummary(w, rep.Summary)
+	}
 	if len(rep.Dimensions) > 0 {
 		fmt.Fprint(w, "  dimensions:")
 		for _, d := range rep.Dimensions {
