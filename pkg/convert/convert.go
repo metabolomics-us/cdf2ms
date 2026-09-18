@@ -445,7 +445,7 @@ func Run(ctx context.Context, paths []string, opts Options) (*Report, error) {
 	bySource := make(map[string]FileResult, len(files))
 	for res := range out {
 		bySource[res.Source] = res
-		if res.Status == StatusFailed {
+		if opts.FailFast && res.Status == StatusFailed {
 			failFast.Store(true)
 		}
 		if opts.OnResult != nil {
