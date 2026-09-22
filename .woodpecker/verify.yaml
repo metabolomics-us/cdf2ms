@@ -1,7 +1,7 @@
 # Slurm agents use the shared Apptainer image and its Git credentials.
 when:
   - event: [push, pull_request, manual]
-    branch: main
+    branch: [main, master]
 
 skip_clone: true
 
@@ -26,3 +26,22 @@ steps:
       - make lint
       - make test
       - make verify
+      - make test-release
+
+  - name: cross-compile
+    image: bash
+    environment:
+      GOPATH: /tmp/woodpecker-cache/go
+      GOCACHE: /tmp/woodpecker-cache/go-build
+    commands:
+      - 'make release VERSION="v0.1.$CI_PIPELINE_NUMBER"'
+
+  - name: publish
+    image: bash
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_release_token
+    commands:
+      - python3 scripts/publish_release.py --artifacts dist
+    when:
+      - evaluate: 'CI_PIPELINE_EVENT == "push" && CI_COMMIT_BRANCH == CI_REPO_DEFAULT_BRANCH'
