@@ -65,6 +65,7 @@ class ReleaseBuilderTest(unittest.TestCase):
             (repo / "docs").mkdir()
             (repo / "docs" / "usage.md").write_text("usage\n", encoding="utf-8")
             (repo / "docs" / "compatibility.md").write_text("compat\n", encoding="utf-8")
+            (repo / "docs" / "releases.md").write_text("releases\n", encoding="utf-8")
 
             linux_bin = base / "cdf2ms-linux"
             linux_bin.write_bytes(b"linux")
@@ -87,7 +88,7 @@ class ReleaseBuilderTest(unittest.TestCase):
                 names = {member.name for member in archive.getmembers()}
                 self.assertEqual(
                     names,
-                    {"cdf2ms", "README.md", "docs/usage.md", "docs/compatibility.md", "VERSION"},
+                    {"cdf2ms", "README.md", "docs/usage.md", "docs/compatibility.md", "docs/releases.md", "VERSION"},
                 )
                 self.assertEqual(archive.getmember("cdf2ms").mode, 0o755)
                 self.assertEqual(archive.getmember("cdf2ms").mtime, 1_700_000_000)
@@ -97,7 +98,7 @@ class ReleaseBuilderTest(unittest.TestCase):
             with zipfile.ZipFile(output / zip_artifact["name"]) as archive:
                 self.assertEqual(
                     set(archive.namelist()),
-                    {"cdf2ms.exe", "README.md", "docs/usage.md", "docs/compatibility.md", "VERSION"},
+                    {"cdf2ms.exe", "README.md", "docs/usage.md", "docs/compatibility.md", "docs/releases.md", "VERSION"},
                 )
                 mode = archive.getinfo("cdf2ms.exe").external_attr >> 16
                 self.assertEqual(stat.S_IMODE(mode), 0o755)

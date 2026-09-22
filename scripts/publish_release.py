@@ -113,14 +113,19 @@ def publish(api, version, commit, files):
     print(f'https://github.com/{REPO}/releases/tag/{version}')
 
 
+def validate_checkout(commit, repo=Path('.')):
+    head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    status = subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo, text=True).strip()
+    if head != commit or status:
+        raise ValueError('Release checkout must be clean and match the pipeline commit')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--artifacts', type=Path, default=Path('dist'))
     args = parser.parse_args()
     version, commit = ci_context(os.environ)
-    head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    if head != commit or subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], text=True).strip():
-        raise ValueError('Release checkout must be clean and match the pipeline commit')
+    validate_checkout(commit)
     files = validate_artifacts(args.artifacts, version, commit)
     token = os.environ.get('GITHUB_TOKEN')
     if not token:

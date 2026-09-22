@@ -24,7 +24,12 @@ TARGETS = tuple(
     for goarch in ("amd64", "arm64")
 )
 VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+\Z")
-DOCUMENTS = ("README.md", "docs/usage.md", "docs/compatibility.md")
+DOCUMENTS = (
+    "README.md",
+    "docs/usage.md",
+    "docs/compatibility.md",
+    "docs/releases.md",
+)
 
 
 def validate_version(value):
@@ -60,7 +65,7 @@ def _write_tar(path, entries, epoch):
 
 
 def _write_zip(path, entries, epoch):
-    stamp = datetime.datetime.fromtimestamp(epoch, datetime.UTC)
+    stamp = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
     timestamp = (stamp.year, stamp.month, stamp.day, stamp.hour, stamp.minute, stamp.second)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content, mode in entries:

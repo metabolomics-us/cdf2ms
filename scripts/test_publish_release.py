@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import Mock
 
@@ -94,6 +95,24 @@ class ReleaseTests(unittest.TestCase):
         calls = api.request.call_args_list
         self.assertEqual(calls[3].args, ('DELETE', '/releases/assets/9'))
         self.assertEqual(calls[-1].args[0], 'PATCH')
+
+    def test_untracked_source_blocks_publication_but_ignored_output_does_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
+            git('init', '-q')
+            (repo / '.gitignore').write_text('dist/\n')
+            git('add', '.gitignore')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                'commit', '-qm', 'Test fixture')
+            commit = git('rev-parse', 'HEAD')
+            (repo / 'dist').mkdir()
+            (repo / 'dist' / 'artifact.zip').write_bytes(b'archive')
+            release.validate_checkout(commit, repo)
+            (repo / 'untracked.go').write_text('package main\n')
+            with self.assertRaises(ValueError):
+                release.validate_checkout(commit, repo)
 
 
 if __name__ == '__main__':

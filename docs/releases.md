@@ -53,7 +53,7 @@ workflow; release publication runs on the laboratory's Woodpecker fleet.
 
 ## Local cross-compilation
 
-With Go 1.25+ and Python 3 installed:
+With Go 1.25+ and Python 3.11+ installed:
 
 ```sh
 make test-release
