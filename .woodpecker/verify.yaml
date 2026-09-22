@@ -1,0 +1,28 @@
+# Slurm agents use the shared Apptainer image and its Git credentials.
+when:
+  - event: [push, pull_request, manual]
+    branch: main
+
+skip_clone: true
+
+steps:
+  - name: checkout
+    image: bash
+    commands:
+      - 'set -eu'
+      - 'test -r /etc/woodpecker-git-credentials'
+      - 'git init -q -b "${CI_COMMIT_BRANCH:-main}" .'
+      - 'git remote add origin "https://github.com/${CI_REPO}.git"'
+      - 'git fetch --no-tags --depth=1 origin "$CI_COMMIT_SHA"'
+      - 'git checkout -q FETCH_HEAD'
+
+  - name: verify
+    image: bash
+    environment:
+      GOPATH: /tmp/woodpecker-cache/go
+      GOCACHE: /tmp/woodpecker-cache/go-build
+      CGO_ENABLED: '0'
+    commands:
+      - make lint
+      - make test
+      - make verify
