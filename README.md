@@ -15,6 +15,14 @@ spectrum back through an independent reader, and refuses to silently change numb
 - **Verified.** Every output is checked against the official mzML 1.1.0 and mzXML
   3.2 schemas plus reference readers (see [docs/compatibility.md](docs/compatibility.md)).
 
+## Downloads
+
+Get Linux, macOS (Intel/Apple Silicon), and Windows binaries from
+[GitHub Releases](https://github.com/metabolomics-us/cdf2ms/releases/latest).
+Downloads currently require access to this private repository.
+See [download and release instructions](docs/releases.md) for platform selection,
+checksums, and automatic build versioning.
+
 ## Quick start
 
 ```sh

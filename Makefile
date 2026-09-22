@@ -6,7 +6,7 @@
 GO        ?= go
 CGO_FLAGS := CGO_ENABLED=0
 
-.PHONY: all lint fmt test build vet verify clean bench
+.PHONY: all lint fmt test build vet verify clean bench release test-release
 
 all: fmt vet build test
 
@@ -41,6 +41,13 @@ verify: build
 
 bench:
 	$(CGO_FLAGS) $(GO) test -bench . -benchmem ./pkg/...
+
+# VERSION must match the release tag; output must be empty to prevent mixing builds.
+release:
+	python3 scripts/build_release.py --version "$(VERSION)" --output dist
+
+test-release:
+	python3 -m unittest discover -s scripts -p 'test_*release.py'
 
 clean:
 	rm -rf bin dist
