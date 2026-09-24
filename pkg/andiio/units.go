@@ -129,11 +129,21 @@ type MagnitudeEvidence struct {
 	ImpliedDeltaMinutes float64
 }
 
-// plausibleScanSpacing bounds a single acquisition in seconds. Real quadrupole
-// acquisitions run 0.05 s to 60 s per scan; anything far outside that band under
-// both hypotheses means the unit cannot be decided from magnitude.
+// plausibleScanSpacing bounds a single acquisition in seconds. Quadrupoles run
+// roughly 0.05 s to 60 s per scan, but time-of-flight GC-MS acquires far faster:
+// LECO Pegasus exports run at 10-20 spectra/s (0.1-0.05 s) and newer TOFs reach
+// 500 spectra/s. The floor therefore sits at 1 ms, well below any real
+// acquisition rate.
+//
+// A floor at a real acquisition rate is worse than no floor at all. At 0.05 s a
+// 20 Hz file whose accumulated times put the median spacing at 0.0499999 s
+// failed the seconds test by float rounding, passed the minutes test alone, and
+// was converted as minutes -- every retention time 60x too large, a 47-minute
+// run reported as 47 hours, with only an "inferred" warning. With the floor
+// below real rates both hypotheses stay plausible for such a file, so it is
+// refused as ambiguous until --rt-unit states the clock.
 const (
-	minPlausibleScanSec = 0.05
+	minPlausibleScanSec = 0.001
 	maxPlausibleScanSec = 60.0
 )
 
