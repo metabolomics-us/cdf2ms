@@ -36,6 +36,7 @@ on them. Notable ones:
 | `ANDI_SCAN_LAYOUT_ASSUMED` | neither index nor count; one-peak-per-scan assumed from array extent |
 | `ANDI_SCAN_INDEX_BASE_ASSUMED` | `scan_index` starts at a non-0/1 origin; used as offset |
 | `ANDI_ZERO_POINT_SCAN` | a scan has zero peaks; emitted as an empty spectrum |
+| `ANDI_SCAN_NUMBERS_UNUSABLE` | the scan-number variable holds negative or fill values (e.g. `-9999`); every spectrum is numbered by ordinal |
 | `ANDI_METADATA_NOT_UTF8` | a global attribute was not valid UTF-8; sanitised and reported |
 | `MZXML_INSTRUMENT_UNREPORTED` | source reports no instrument identity |
 | `MZXML_INSTRUMENT_PLACEHOLDER` | instrument identity was a placeholder, not a real name |
