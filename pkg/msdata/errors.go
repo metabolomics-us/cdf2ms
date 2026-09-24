@@ -86,6 +86,13 @@ const (
 	CodeANDIAmbiguousUnits       Code = "ANDI_AMBIGUOUS_UNITS"
 	CodeANDIUnitInferredFromMag  Code = "ANDI_UNIT_INFERRED_FROM_MAGNITUDE"
 	CodeANDIUsedPointTimeUnit    Code = "ANDI_USED_POINT_TIME_UNIT"
+	// CodeANDIScanNumbersUnusable: the scan-number variable holds negative or
+	// fill values (ANDI exporters write -9999 for "not recorded"), so every
+	// spectrum is numbered by ordinal instead.
+	CodeANDIScanNumbersUnusable Code = "ANDI_SCAN_NUMBERS_UNUSABLE"
+	// CodeANDIAcquisitionTimeUnusable: experiment_date_time_stamp is present
+	// but unparseable or carries no UTC offset, so the run start is omitted.
+	CodeANDIAcquisitionTimeUnusable Code = "ANDI_ACQUISITION_TIME_UNUSABLE"
 
 	// Output problems.
 	CodeOutputWriteFailed Code = "OUTPUT_WRITE_FAILED"

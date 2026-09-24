@@ -301,6 +301,27 @@ func TestMzXMLDetectsBrokenIndexOffset(t *testing.T) {
 	expectProblem(t, mut, c.src, "index offset that does not point at <scan>")
 }
 
+// TestMzXMLDetectsWrongIndexOffsetElement: consumers seek to <indexOffset> to
+// find the index, so an indexOffset that misses <index> is a broken document
+// even when the index itself is intact.
+func TestMzXMLDetectsWrongIndexOffsetElement(t *testing.T) {
+	c := build(t, defaultOpt(), "auto", false)
+	mut := mutate(t, c.mzxml, func(b []byte) []byte {
+		re := regexp.MustCompile(`<indexOffset>([0-9]+)</indexOffset>`)
+		m := re.FindSubmatchIndex(b)
+		if m == nil {
+			t.Fatal("no indexOffset element found")
+		}
+		var v int
+		if _, err := fmt.Sscanf(string(b[m[2]:m[3]]), "%d", &v); err != nil {
+			t.Fatalf("bad indexOffset %q", b[m[2]:m[3]])
+		}
+		return append(append(append([]byte{}, b[:m[2]]...),
+			[]byte(fmt.Sprintf("%d", v-3))...), b[m[3]:]...)
+	})
+	expectProblem(t, mut, c.src, "indexOffset that does not point at <index>")
+}
+
 func TestMzXMLDetectsTamperedSHA1(t *testing.T) {
 	c := build(t, defaultOpt(), "auto", false)
 	mut := mutate(t, c.mzxml, func(b []byte) []byte {

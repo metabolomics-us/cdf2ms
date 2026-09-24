@@ -89,6 +89,35 @@ def check_schema(doc_path, xsd_path, label):
 
 # ---------------- ANDI source truth ----------------
 
+# Seconds per unit for the retention-time units ANDI exporters write.
+RT_UNIT_SECONDS = {
+    "s": 1.0, "sec": 1.0, "secs": 1.0, "second": 1.0, "seconds": 1.0,
+    "min": 60.0, "mins": 60.0, "minute": 60.0, "minutes": 60.0,
+    "h": 3600.0, "hr": 3600.0, "hour": 3600.0, "hours": 3600.0,
+}
+
+# The --rt-unit override, set in main(); None means "use the source's units".
+RT_UNIT_OVERRIDE = None
+
+
+def rt_seconds_per_unit(ds):
+    """Seconds per source retention-time unit.
+
+    The converter writes retention times in seconds, so the truth must be in
+    seconds too. The override wins; otherwise scan_acquisition_time.units, then
+    time_values.units (the same clock in the ANDI template). A source that
+    states neither is taken as seconds.
+    """
+    if RT_UNIT_OVERRIDE:
+        return RT_UNIT_SECONDS[RT_UNIT_OVERRIDE]
+    for name in ("scan_acquisition_time", "time_values"):
+        if name in ds.variables:
+            unit = str(getattr(ds.variables[name], "units", "")).strip().lower()
+            if unit in RT_UNIT_SECONDS:
+                return RT_UNIT_SECONDS[unit]
+    return 1.0
+
+
 def load_truth(src):
     from netCDF4 import Dataset
     import numpy as np
@@ -101,11 +130,17 @@ def load_truth(src):
         mz = np.asarray(ds.variables["mass_values"][:], dtype="float64")
         inten = np.asarray(ds.variables["intensity_values"][:], dtype="float64")
         rt = np.asarray(ds.variables["scan_acquisition_time"][:], dtype="float64")
+        rt = rt * rt_seconds_per_unit(ds)
         scan_num = None
         for name in ("actual_scan_number", "scan_number"):
             if name in ds.variables:
                 scan_num = np.asarray(ds.variables[name][:], dtype="int64")
                 break
+        # Mirror the converter: negative or fill scan numbers (ANDI's -9999
+        # "not recorded") disqualify the variable, and scans are numbered by
+        # ordinal instead.
+        if scan_num is not None and scan_num.size and int(scan_num.min()) < 0:
+            scan_num = None
     finally:
         ds.close()
     return idx, cnt, mz, inten, rt, scan_num
@@ -468,7 +503,12 @@ def main():
     ap.add_argument("--mzxml-xsd-dir",
                     default=os.path.join(REPO, "pkg", "mzxml", "testdata", "schema"))
     ap.add_argument("--no-pyteomics", action="store_true")
+    ap.add_argument("--rt-unit", choices=["seconds", "minutes"], default=None,
+                    help="source retention-time unit when the CDF states none "
+                         "(match the converter's --rt-unit)")
     args = ap.parse_args()
+    global RT_UNIT_OVERRIDE
+    RT_UNIT_OVERRIDE = args.rt_unit
 
     fmt = detect_format(args.document)
     print("format: %s (%s)" % (fmt.upper(), os.path.basename(args.document)))

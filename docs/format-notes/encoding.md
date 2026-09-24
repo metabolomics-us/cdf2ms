@@ -48,3 +48,8 @@ decisions the writers make so the implementation and the schemas stay in lockste
   schema model requires a `processingOperation` (with an optional `comment`) per
   repetition — two comments in one repetition is invalid.
 - Both writers stamp the converter name, version, timestamp, and RT-unit origin.
+- The conversion time lives only in provenance (`cdf2ms:converted_at_utc`).
+  mzML `run@startTimeStamp` is the acquisition time, taken from the source's
+  `experiment_date_time_stamp` (`YYYYMMDDhhmmss±hhmm`) and written in UTC. It is
+  omitted when the source states none or states one without a UTC offset
+  (`ANDI_ACQUISITION_TIME_UNUSABLE`).
