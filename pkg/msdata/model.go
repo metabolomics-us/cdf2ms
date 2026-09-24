@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Polarity describes the polarity of a scan. The zero value is Unknown: it is
@@ -269,6 +270,15 @@ type Run struct {
 	SchemaFingerprint string
 	// VendorFingerprint groups files by exporter/instrument characteristics.
 	VendorFingerprint string
+
+	// AcquisitionStart is when the instrument started the run, from the
+	// source's own timestamp. It is zero when the source states none or states
+	// one without a UTC offset: a zoneless wall-clock time is not an instant,
+	// and stamping it as UTC would invent one. The conversion time is recorded
+	// separately and never stands in for it.
+	AcquisitionStart time.Time
+	// AcquisitionStartOrigin names the source field AcquisitionStart came from.
+	AcquisitionStartOrigin string
 
 	// Metadata carries all preserved, unmapped source metadata.
 	Metadata Metadata

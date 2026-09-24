@@ -11,6 +11,7 @@ import (
 
 	"github.com/metabolomics-us/cdf2ms/pkg/msdata"
 	"github.com/metabolomics-us/cdf2ms/pkg/netcdfio"
+	"time"
 )
 
 // globalMap maps ANDI global attributes onto Instrument fields. The value is the
@@ -189,6 +190,18 @@ func BuildRunMetadata(f *netcdfio.File, l *Layout, rtUnit RTUnit, plan *ScanPlan
 			apply(field, clean, origin)
 		}
 		run.Metadata[origin] = msdata.MetadataValue{Kind: msdata.KindString, Str: clean, Origin: origin}
+	}
+
+	if a, ok := f.Globals["experiment_date_time_stamp"]; ok {
+		if raw := sanitizeText(attrRawText(a)); raw != "" {
+			if ts, ok := ParseANDIDateTime(raw); ok {
+				run.AcquisitionStart = ts
+				run.AcquisitionStartOrigin = "global:experiment_date_time_stamp"
+			} else {
+				d.WarnDetail(msdata.CodeANDIAcquisitionTimeUnusable, 0, "global:experiment_date_time_stamp="+raw,
+					"experiment_date_time_stamp %q is not a timestamp with a UTC offset; the run start time is omitted", raw)
+			}
+		}
 	}
 
 	// preserved extras that live only in metadata
@@ -455,4 +468,27 @@ func sortStrings(s []string) {
 		}
 		s[j+1] = x
 	}
+}
+
+// andiDateTimeLayouts are the timestamp shapes accepted for the run start. The
+// ANDI/MS template (ASTM E1947) writes YYYYMMDDhhmmss followed by a signed UTC
+// offset, e.g. "20170320235239-0800"; every production file surveyed uses it.
+// RFC 3339 is accepted for exporters that write ISO timestamps. Layouts without
+// an offset are deliberately absent.
+var andiDateTimeLayouts = []string{
+	"20060102150405-0700",
+	"20060102150405Z0700",
+	time.RFC3339Nano,
+}
+
+// ParseANDIDateTime parses an ANDI date-time stamp into UTC. It reports false
+// for anything without an explicit UTC offset.
+func ParseANDIDateTime(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	for _, layout := range andiDateTimeLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }

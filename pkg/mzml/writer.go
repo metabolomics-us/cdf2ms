@@ -350,8 +350,10 @@ func (w *Writer) writeHeader() error {
 	if w.sample != "" {
 		fmt.Fprintf(b, " sampleRef=%q", w.sample)
 	}
-	if !w.opts.Timestamp.IsZero() {
-		fmt.Fprintf(b, " startTimeStamp=%q", w.opts.Timestamp.UTC().Format("2006-01-02T15:04:05.000000"))
+	// startTimeStamp is when the run was acquired. The conversion time is
+	// recorded as cdf2ms:converted_at_utc and must never stand in for it.
+	if !w.run.AcquisitionStart.IsZero() {
+		fmt.Fprintf(b, " startTimeStamp=%q", w.run.AcquisitionStart.UTC().Format(time.RFC3339))
 	}
 	b.WriteString(">\n")
 	fmt.Fprintf(b, "    <spectrumList count=\"%d\" defaultDataProcessingRef=%q>\n", w.declared, w.dpID)
@@ -679,6 +681,9 @@ func provenanceParams(run *msdata.Run, src msdata.SourceFile, opts Options) []kv
 	}
 	if src.SHA256 != "" {
 		out = append(out, kv{"cdf2ms:source_sha256", src.SHA256})
+	}
+	if !run.AcquisitionStart.IsZero() {
+		out = append(out, kv{"cdf2ms:acquisition_start_origin", run.AcquisitionStartOrigin})
 	}
 	if run.RetentionTimeUnitOrigin != "" {
 		out = append(out, kv{"cdf2ms:retention_time_unit", run.RetentionTimeUnit},
