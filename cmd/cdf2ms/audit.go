@@ -141,10 +141,15 @@ func cmdAudit(ctx context.Context, args []string) int {
 	return exitOK
 }
 
-func auditOne(ctx context.Context, path string, policy andiio.RTUnitPolicy, deep bool) auditReport {
-	started := time.Now()
-	rep := auditReport{Path: path, Verdict: verdictConvertible}
-	defer func() { rep.ElapsedMS = time.Since(started).Milliseconds() }()
+// auditClock times each audit; a variable so tests can advance it.
+var auditClock = time.Now
+
+// auditOne audits one source. rep is a named result so the deferred timing
+// lands on the value returned rather than on a copy taken before it ran.
+func auditOne(ctx context.Context, path string, policy andiio.RTUnitPolicy, deep bool) (rep auditReport) {
+	started := auditClock()
+	rep = auditReport{Path: path, Verdict: verdictConvertible}
+	defer func() { rep.ElapsedMS = auditClock().Sub(started).Milliseconds() }()
 	r, err := andiio.Open(path, andiio.Options{RTUnit: policy})
 	if err != nil {
 		rep.Verdict = verdictNo

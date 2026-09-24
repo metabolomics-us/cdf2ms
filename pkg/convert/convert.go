@@ -524,11 +524,19 @@ func defaultWorkers() int {
 	return n
 }
 
+// elapsedClock times each file. It is a variable so tests can advance it;
+// Options.Now is the reproducible document timestamp and is often frozen.
+var elapsedClock = time.Now
+
 // convertOne streams one source into every requested format.
-func convertOne(ctx context.Context, path string, worker int, opts Options) FileResult {
-	start := time.Now()
-	res := FileResult{Source: path, Worker: worker}
-	defer func() { res.ElapsedMS = time.Since(start).Milliseconds() }()
+//
+// res is a named result so the deferred timing lands on the value returned.
+// With a local variable the defer updated a copy after the return value was
+// taken, and every file reported elapsedMs 0.
+func convertOne(ctx context.Context, path string, worker int, opts Options) (res FileResult) {
+	start := elapsedClock()
+	res = FileResult{Source: path, Worker: worker}
+	defer func() { res.ElapsedMS = elapsedClock().Sub(start).Milliseconds() }()
 
 	policy, err := andiio.ParseRTUnitPolicy(opts.RTUnit)
 	if err != nil {
