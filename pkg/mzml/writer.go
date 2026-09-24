@@ -346,7 +346,7 @@ func (w *Writer) writeHeader() error {
 	fmt.Fprintf(b, "  </dataProcessingList>\n")
 
 	// run + spectrumList
-	fmt.Fprintf(b, "  <run id=%q defaultInstrumentConfigurationRef=%q", xmlAttr(w.opts.DocumentID), w.icID)
+	fmt.Fprintf(b, "  <run id=%q defaultInstrumentConfigurationRef=%q", runID(w.opts.DocumentID), w.icID)
 	if w.sample != "" {
 		fmt.Fprintf(b, " sampleRef=%q", w.sample)
 	}
@@ -893,6 +893,33 @@ func xmlAttr(s string) string {
 }
 
 // xmlID turns arbitrary text into an XML NCName.
+// runID makes a run name a valid xs:ID (an NCName) for run@id. Lab sample names
+// begin with the acquisition date ("130824ceasa17_1"), and an NCName cannot
+// begin with a digit, so every such document failed the official mzML schema.
+// A leading "_" is added only when needed; letters, digits, '.', '-' and '_'
+// are kept so the ID still reads as the sample name. The unmodified name stays
+// in mzML@id, which is xs:string.
+func runID(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == '_':
+			b.WriteByte(c)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	id := b.String()
+	if id == "" {
+		return "run"
+	}
+	if c := id[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_') {
+		id = "_" + id
+	}
+	return id
+}
+
 func xmlID(s string) string {
 	if s == "" {
 		return "x"
