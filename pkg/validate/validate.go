@@ -734,29 +734,22 @@ func verifyMzXMLIndex(path string, nums []int64, res *Result, opts Options) erro
 	}
 	size := st.Size()
 
-	// The index section is at the tail: read a generous window and parse it.
-	tail := int64(1 << 20)
-	if size < tail {
-		tail = size
-	}
-	buf := make([]byte, tail)
-	if _, err := f.ReadAt(buf, size-tail); err != nil && err != io.EOF {
+	// Find the index the way an indexed consumer does: follow <indexOffset> from
+	// the document tail to the start of <index>. A fixed tail window is not
+	// enough -- the index grows about 40 bytes per scan, and a 56,660-scan GC-TOF
+	// run has a 2.3 MB index whose start lay outside a 1 MB window, so a correct
+	// document was reported as having no index at all.
+	sect, err := readMzXMLIndex(f, size, res)
+	if err != nil {
 		return err
 	}
-	start := strings.LastIndex(string(buf), "<index name=\"scan\">")
 	offsets := []int64{}
 	ids := []int64{}
-	if start >= 0 {
-		sect := buf[start:]
-		if end := strings.Index(string(sect), "</index>"); end > 0 {
-			sect = sect[:end]
-		}
-		for _, m := range reOffset.FindAllStringSubmatch(string(sect), -1) {
-			id, _ := strconv.ParseInt(m[1], 10, 64)
-			off, _ := strconv.ParseInt(m[2], 10, 64)
-			ids = append(ids, id)
-			offsets = append(offsets, off)
-		}
+	for _, m := range reOffset.FindAllStringSubmatch(sect, -1) {
+		id, _ := strconv.ParseInt(m[1], 10, 64)
+		off, _ := strconv.ParseInt(m[2], 10, 64)
+		ids = append(ids, id)
+		offsets = append(offsets, off)
 	}
 	if opts.SkipIndex {
 		res.IndexOK = true
@@ -855,6 +848,50 @@ func first40(s string) string {
 		return s[:40]
 	}
 	return s
+}
+
+// mzXMLTailWindow bounds the read that locates <indexOffset>; after it come
+// only <sha1> and the closing tag.
+const mzXMLTailWindow = 64 << 10
+
+var reIndexOffset = regexp.MustCompile(`<indexOffset>\s*(-?[0-9]+)\s*</indexOffset>`)
+
+// readMzXMLIndex returns the <index name="scan"> section that <indexOffset>
+// points at, or "" when the document declares no index. An offset that does
+// not land on the index is reported as a problem, since consumers seek there.
+func readMzXMLIndex(f *os.File, size int64, res *Result) (string, error) {
+	tail := int64(mzXMLTailWindow)
+	if size < tail {
+		tail = size
+	}
+	buf := make([]byte, tail)
+	if _, err := f.ReadAt(buf, size-tail); err != nil && err != io.EOF {
+		return "", err
+	}
+	all := reIndexOffset.FindAllSubmatch(buf, -1)
+	if len(all) == 0 {
+		return "", nil
+	}
+	off, err := strconv.ParseInt(string(all[len(all)-1][1]), 10, 64)
+	if err != nil || off <= 0 || off >= size {
+		res.problem(0, msdata.CodeMZXMLValidationFailed,
+			"indexOffset %s is outside the file (%d bytes)", all[len(all)-1][1], size)
+		return "", nil
+	}
+	sect := make([]byte, size-off)
+	if _, err := f.ReadAt(sect, off); err != nil && err != io.EOF {
+		return "", err
+	}
+	const open = "<index name=\"scan\">"
+	if !strings.HasPrefix(string(sect), open) {
+		res.problem(0, msdata.CodeMZXMLValidationFailed,
+			"indexOffset %d does not point at %s (found %q)", off, open, first40(string(sect)))
+		return "", nil
+	}
+	if end := strings.Index(string(sect), "</index>"); end > 0 {
+		sect = sect[:end]
+	}
+	return string(sect), nil
 }
 
 // findTag locates the first occurrence of a literal tag by scanning the file in

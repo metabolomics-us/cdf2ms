@@ -96,6 +96,13 @@ const (
 	// file-global time unit disagree. The variable-level (more specific) unit is
 	// used; the disagreement is reported because one of the two is wrong.
 	CodeANDIRTUnitConflict Code = "ANDI_RT_UNIT_CONFLICT"
+	// CodeANDIScanNumbersUnusable: the scan-number variable holds negative or
+	// fill values (ANDI exporters write -9999 for "not recorded"), so every
+	// spectrum is numbered by ordinal instead.
+	CodeANDIScanNumbersUnusable Code = "ANDI_SCAN_NUMBERS_UNUSABLE"
+	// CodeANDIAcquisitionTimeUnusable: experiment_date_time_stamp is present
+	// but unparseable or carries no UTC offset, so the run start is omitted.
+	CodeANDIAcquisitionTimeUnusable Code = "ANDI_ACQUISITION_TIME_UNUSABLE"
 
 	// Output problems.
 	CodeOutputWriteFailed Code = "OUTPUT_WRITE_FAILED"

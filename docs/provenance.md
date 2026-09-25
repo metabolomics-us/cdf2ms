@@ -38,6 +38,8 @@ on them. Notable ones:
 | `ANDI_SCAN_LAYOUT_ASSUMED` | neither index nor count; one-peak-per-scan assumed from array extent |
 | `ANDI_SCAN_INDEX_BASE_ASSUMED` | `scan_index` starts at a non-0/1 origin; used as offset |
 | `ANDI_ZERO_POINT_SCAN` | a scan has zero peaks; emitted as an empty spectrum |
+| `ANDI_ACQUISITION_TIME_UNUSABLE` | `experiment_date_time_stamp` is unparseable or has no UTC offset; the run start time is omitted, the raw value is kept as a user param |
+| `ANDI_SCAN_NUMBERS_UNUSABLE` | the scan-number variable holds negative or fill values (e.g. `-9999`); every spectrum is numbered by ordinal |
 | `ANDI_METADATA_NOT_UTF8` | a global attribute was not valid UTF-8; sanitised and reported |
 | `MZML_SCAN_NUMBER_OMITTED` | source scan number is a negative missing marker; spectrum ids keep only the `index=` component |
 | `MZML_NON_PHYSICAL_METADATA_OMITTED` | an optional ANDI value cannot be a measurement (negative duration/delay); omitted, not published |

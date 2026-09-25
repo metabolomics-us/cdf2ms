@@ -55,6 +55,10 @@ type Reader struct {
 	defCent     msdata.CentroidState
 	centOrig    string
 
+	// scanNumbersUnusable is set when the scan-number variable holds negative
+	// or fill values; every spectrum is then numbered by ordinal.
+	scanNumbersUnusable bool
+
 	// aux is the per-scan metadata block currently held in memory.
 	aux      *auxBlock
 	nextScan int
@@ -166,10 +170,60 @@ func Open(path string, opts Options) (*Reader, error) {
 		f.Close()
 		return nil, err
 	}
+	if err := r.vetScanNumbers(); err != nil {
+		f.Close()
+		return nil, err
+	}
 	r.deriveScanConstants()
 	r.run = BuildRunMetadata(f, layout, r.rtUnit, r.plan, src, d)
 	r.applyDerivedRunFields()
 	return r, nil
+}
+
+// vetScanNumbers decides once per file whether the scan-number variable can be
+// trusted. ANDI exporters that do not record scan numbers fill the variable
+// with -9999 and declare no _FillValue, so the sentinel otherwise reached the
+// output as a real number ("scan=-9999" on every spectrum). A scan number is
+// never negative, so any negative or fill value disqualifies the whole
+// variable: mixing source numbers with ordinals inside one file could repeat a
+// number, and consumers key spectra on it.
+//
+// The array is one integer per scan and is streamed in bounded chunks.
+func (r *Reader) vetScanNumbers() error {
+	ref := r.layout.ScanNumber
+	if ref == nil {
+		return nil
+	}
+	const chunk = 4096
+	ext := ref.Var.Extent()
+	bad, first := int64(0), int64(0)
+	for start := int64(0); start < ext; start += chunk {
+		n := int64(chunk)
+		if start+n > ext {
+			n = ext - start
+		}
+		vals, err := r.f.ReadInts(ref.Var, start, n)
+		if err != nil {
+			return msdata.WrapError(msdata.CodeNCReadFailed, err, "reading %s at scan %d", ref.Name, start)
+		}
+		for _, v := range vals {
+			if v < 0 || ref.IsFill(float64(v)) {
+				if bad == 0 {
+					first = v
+				}
+				bad++
+			}
+		}
+	}
+	if bad == 0 {
+		return nil
+	}
+	r.scanNumbersUnusable = true
+	r.diag.WarnDetail(msdata.CodeANDIScanNumbersUnusable, 0,
+		fmt.Sprintf("var:%s: %d of %d values are negative or fill (first %d)", ref.Name, bad, ext, first),
+		"%s holds %d negative or fill values (first %d); every spectrum is numbered by ordinal instead",
+		ref.Name, bad, first)
+	return nil
 }
 
 // resolveRTUnit samples acquisition times and resolves the unit.
@@ -496,7 +550,7 @@ func (r *Reader) Next(ctx context.Context) (*msdata.Spectrum, error) {
 	}
 
 	// scan number
-	if r.aux.scanNumber != nil && i-r.aux.base < len(r.aux.scanNumber) {
+	if !r.scanNumbersUnusable && r.aux.scanNumber != nil && i-r.aux.base < len(r.aux.scanNumber) {
 		n := r.aux.scanNumber[i-r.aux.base]
 		s.ScanNumber = &n
 		s.ScanNumberOrigin = "var:" + r.layout.ScanNumber.Name

@@ -57,7 +57,7 @@ and the CI `real-corpus` job):
 - `mzkit-08GB.cdf` (HDF5/NetCDF4, TIC-only — detected, not converted)
 - `Warden0001_MX05001119_posPM_40-6660-458-0040_1.cdf` (Agilent GC/MS, centroid;
   14 989 scans, 4 441 571 points, SHA-256 `6551244f…7094ba`) — a file a user
-  reported as unloadable in mzMine: `scan_acquisition_time` carries no
+  reported as unloadable in a tool the reporter named "mzMine" (product name as reported; exact tool identity uncertain): `scan_acquisition_time` carries no
   attributes at all and the 0.0588 s scan spacing fits both clocks, so the unit
   comes only from the file-global `units = "Seconds"`. Converted and verified
   peak-for-peak; the equivalent shape is reproduced by the `global-units`

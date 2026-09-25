@@ -71,7 +71,7 @@ magnitude test on the scan spacing. The magnitude test must be decisive — one
 hypothesis plausible, the other not — or the file is a **not-convertible**
 verdict with a stable `ANDI_AMBIGUOUS_UNITS` code and a pointer to `--rt-unit`.
 A unit stated anywhere in the file is never overridden by the heuristic, and is
-honoured by `-rt-unit strict` too; a global `units` that is not a time unit (an
+honoured by `--rt-unit strict` too; a global `units` that is not a time unit (an
 m/z or intensity unit) is ignored for this purpose.
 
 ## Convert

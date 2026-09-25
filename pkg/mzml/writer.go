@@ -351,12 +351,14 @@ func (w *Writer) writeHeader() error {
 	fmt.Fprintf(b, "  </dataProcessingList>\n")
 
 	// run + spectrumList
-	fmt.Fprintf(b, "  <run id=%q defaultInstrumentConfigurationRef=%q", xmlAttr(w.opts.DocumentID), w.icID)
+	fmt.Fprintf(b, "  <run id=%q defaultInstrumentConfigurationRef=%q", runID(w.opts.DocumentID), w.icID)
 	if w.sample != "" {
 		fmt.Fprintf(b, " sampleRef=%q", w.sample)
 	}
-	if !w.opts.Timestamp.IsZero() {
-		fmt.Fprintf(b, " startTimeStamp=%q", w.opts.Timestamp.UTC().Format("2006-01-02T15:04:05.000000"))
+	// startTimeStamp is when the run was acquired. The conversion time is
+	// recorded as cdf2ms:converted_at_utc and must never stand in for it.
+	if !w.run.AcquisitionStart.IsZero() {
+		fmt.Fprintf(b, " startTimeStamp=%q", w.run.AcquisitionStart.UTC().Format(time.RFC3339))
 	}
 	b.WriteString(">\n")
 	fmt.Fprintf(b, "    <spectrumList count=\"%d\" defaultDataProcessingRef=%q>\n", w.declared, w.dpID)
@@ -732,6 +734,9 @@ func provenanceParams(run *msdata.Run, src msdata.SourceFile, opts Options) []kv
 	if src.SHA256 != "" {
 		out = append(out, kv{"cdf2ms:source_sha256", src.SHA256})
 	}
+	if !run.AcquisitionStart.IsZero() {
+		out = append(out, kv{"cdf2ms:acquisition_start_origin", run.AcquisitionStartOrigin})
+	}
 	if run.RetentionTimeUnitOrigin != "" {
 		out = append(out, kv{"cdf2ms:retention_time_unit", run.RetentionTimeUnit},
 			kv{"cdf2ms:retention_time_unit_origin", run.RetentionTimeUnitOrigin})
@@ -945,6 +950,33 @@ func xmlAttr(s string) string {
 }
 
 // xmlID turns arbitrary text into an XML NCName.
+// runID makes a run name a valid xs:ID (an NCName) for run@id. Lab sample names
+// begin with the acquisition date ("130824ceasa17_1"), and an NCName cannot
+// begin with a digit, so every such document failed the official mzML schema.
+// A leading "_" is added only when needed; letters, digits, '.', '-' and '_'
+// are kept so the ID still reads as the sample name. The unmodified name stays
+// in mzML@id, which is xs:string.
+func runID(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '-', c == '_':
+			b.WriteByte(c)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	id := b.String()
+	if id == "" {
+		return "run"
+	}
+	if c := id[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_') {
+		id = "_" + id
+	}
+	return id
+}
+
 func xmlID(s string) string {
 	if s == "" {
 		return "x"

@@ -77,6 +77,9 @@ jobs:
         run: |
           set -e
           /tmp/cdf2ms fixtures -variant plain,minutes,cdf2,cdf5,packed /tmp/fx >/dev/null
+          # Lab sample names start with the acquisition date; run@id must
+          # still be a valid xs:ID.
+          cp /tmp/fx/plain-01.cdf /tmp/fx/130824plain_1.cdf
           /tmp/cdf2ms convert -overwrite -verify /tmp/fx >/dev/null
           # mzXML validates against the committed official schema; mzML's XSD is
           # fetched on first use by the script (same as the dev-time setup).
