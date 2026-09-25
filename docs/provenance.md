@@ -31,12 +31,16 @@ on them. Notable ones:
 | `ANDI_AMBIGUOUS_UNITS` | RT unit undetermined and magnitudes not decisive; re-run with `--rt-unit` |
 | `ANDI_UNIT_INFERRED_FROM_MAG` | RT unit inferred from a decisive magnitude test |
 | `ANDI_USED_POINT_TIME_UNIT` | RT taken from per-point time values' unit |
+| `ANDI_USED_GLOBAL_TIME_UNIT` | `scan_acquisition_time` states no unit; taken from the file-global `units` attribute (how Agilent declares seconds) |
+| `ANDI_RT_UNIT_CONFLICT` | a variable-level and the file-global time unit disagree; the more specific variable-level unit is used |
 | `ANDI_POINT_COUNT_MISMATCH` | declared peak counts disagree with the peak arrays |
 | `ANDI_POINT_COUNT_DERIVED` | `point_count` absent; counts derived from `scan_index` |
 | `ANDI_SCAN_LAYOUT_ASSUMED` | neither index nor count; one-peak-per-scan assumed from array extent |
 | `ANDI_SCAN_INDEX_BASE_ASSUMED` | `scan_index` starts at a non-0/1 origin; used as offset |
 | `ANDI_ZERO_POINT_SCAN` | a scan has zero peaks; emitted as an empty spectrum |
 | `ANDI_METADATA_NOT_UTF8` | a global attribute was not valid UTF-8; sanitised and reported |
+| `MZML_SCAN_NUMBER_OMITTED` | source scan number is a negative missing marker; spectrum ids keep only the `index=` component |
+| `MZML_NON_PHYSICAL_METADATA_OMITTED` | an optional ANDI value cannot be a measurement (negative duration/delay); omitted, not published |
 | `MZXML_INSTRUMENT_UNREPORTED` | source reports no instrument identity |
 | `MZXML_INSTRUMENT_PLACEHOLDER` | instrument identity was a placeholder, not a real name |
 | `MZXML_SCAN_NUMBER_FALLBACK` | source scan numbers unusable; 1-based ordinals used |

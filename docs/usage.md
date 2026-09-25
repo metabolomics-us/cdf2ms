@@ -55,15 +55,24 @@ cdf2ms audit -deep -json ./corpus
 The audit reports:
 
 - verdict (convertible / convertible-with-warnings / not-convertible);
-- retention-time unit, its origin (declared, inferred from magnitude, or
-  ambiguous) and confidence;
+- retention-time unit, its origin (`var:` declared on the variable, `global:`
+  declared by the file, `inference:` from magnitude, or ambiguous) and
+  confidence;
 - the scan plan (how per-scan peak counts are derived);
 - role mapping (which variables play which ANDI role);
 - missing required roles, aliases, unmapped variables, and warnings;
 - with `-deep`, optional per-scan statistics.
 
-An ambiguous retention-time unit is a **not-convertible** verdict with a stable
-`ANDI_AMBIGUOUS_UNITS` code and a pointer to `--rt-unit`.
+Retention-time units are resolved in this order: `scan_acquisition_time.units`,
+then `time_values.units`, then the file-global `units` attribute (ASTM E1482
+general data defines it for the chromatographic axis, and Agilent writes it on
+exports whose time variable has no attributes of its own), and only then a
+magnitude test on the scan spacing. The magnitude test must be decisive — one
+hypothesis plausible, the other not — or the file is a **not-convertible**
+verdict with a stable `ANDI_AMBIGUOUS_UNITS` code and a pointer to `--rt-unit`.
+A unit stated anywhere in the file is never overridden by the heuristic, and is
+honoured by `-rt-unit strict` too; a global `units` that is not a time unit (an
+m/z or intensity unit) is ignored for this purpose.
 
 ## Convert
 
