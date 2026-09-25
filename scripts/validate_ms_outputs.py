@@ -341,6 +341,14 @@ def check_numbers(path, fmt, src, max_spectra, tol, problems):
     it = iter_mzml(path) if fmt == "mzml" else iter_mzxml(path)
     compared = seen = bad = 0
     offset = None
+    # A negative actual_scan_number is a missing marker, not a scan number: Agilent
+    # writes -9999 for "undefined" on every scan of some exports. mzXML scan/@num
+    # is xs:positiveInteger and cannot carry it, so the converter falls back to
+    # 1-based ordinals and records MZXML_SCAN_NUMBER_FALLBACK. Demand that
+    # documented fallback here instead of matching a constant offset against a
+    # value that was never a number -- otherwise a correct document is reported
+    # as differing from the source on every scan but the first.
+    numbering_usable = scan_num is not None and int(np.min(scan_num)) > 0
     for sp in it:
         if seen >= n:
             break
@@ -349,15 +357,23 @@ def check_numbers(path, fmt, src, max_spectra, tol, problems):
         if fmt == "mzml" and sp["index"] != i:
             problems.append("spectrum index %d at position %d" % (sp["index"], i))
             bad += 1
-        if fmt == "mzxml":
-            if scan_num is not None:
+        if fmt == "mzxml" and scan_num is not None:
+            src_num = int(scan_num[i])
+            if not numbering_usable:
+                ordinal = i + 1
+                if sp["num"] != ordinal:
+                    problems.append("scan %d: num=%d, but the source scan number %d is a missing "
+                                    "marker, so the 1-based ordinal %d is expected"
+                                    % (i, sp["num"], src_num, ordinal))
+                    bad += 1
+            else:
                 # mzXML @num is 1-based; a 0-based source sequence shifts by one.
-                d = sp["num"] - int(scan_num[i])
+                d = sp["num"] - src_num
                 if offset is None:
                     offset = d
                 if d != offset:
                     problems.append("scan %d: num=%d vs source actual_scan_number=%d "
-                                    "(offset changed from %d)" % (i, sp["num"], scan_num[i], offset))
+                                    "(offset changed from %d)" % (i, sp["num"], src_num, offset))
                     bad += 1
         want_mz, want_int = clean(mz[idx[i]:idx[i] + cnt[i]], inten[idx[i]:idx[i] + cnt[i]])
         got_mz = np.asarray([] if sp["mz"] is None else sp["mz"], dtype="float64")
