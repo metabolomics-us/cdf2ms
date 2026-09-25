@@ -86,6 +86,16 @@ const (
 	CodeANDIAmbiguousUnits       Code = "ANDI_AMBIGUOUS_UNITS"
 	CodeANDIUnitInferredFromMag  Code = "ANDI_UNIT_INFERRED_FROM_MAGNITUDE"
 	CodeANDIUsedPointTimeUnit    Code = "ANDI_USED_POINT_TIME_UNIT"
+	// CodeANDIUsedGlobalTimeUnit records that scan_acquisition_time states no unit
+	// of its own and the unit was taken from a file-global attribute. ASTM E1482
+	// general data defines a global `units` for the chromatographic time axis,
+	// which is how Agilent exports declare seconds while leaving the time
+	// variable itself bare.
+	CodeANDIUsedGlobalTimeUnit Code = "ANDI_USED_GLOBAL_TIME_UNIT"
+	// CodeANDIRTUnitConflict records that a variable-level time unit and the
+	// file-global time unit disagree. The variable-level (more specific) unit is
+	// used; the disagreement is reported because one of the two is wrong.
+	CodeANDIRTUnitConflict Code = "ANDI_RT_UNIT_CONFLICT"
 
 	// Output problems.
 	CodeOutputWriteFailed Code = "OUTPUT_WRITE_FAILED"
@@ -105,6 +115,14 @@ const (
 	// instrument, so <msInstrument> is omitted (mzXML requires every component
 	// whenever the element is present).
 	CodeMZXMLInstrumentUnreported Code = "MZXML_INSTRUMENT_UNREPORTED"
+	// CodeMZMLScanNumberOmitted marks a source scan number that is not a scan
+	// number at all (a negative missing marker), so the mzML spectrum id keeps
+	// only the index component.
+	CodeMZMLScanNumberOmitted Code = "MZML_SCAN_NUMBER_OMITTED"
+	// CodeMZMLNonPhysicalOmitted marks optional ANDI metadata omitted because its
+	// value is physically impossible (a negative duration or scan delay is a
+	// missing marker, not a measurement) and would otherwise be published as data.
+	CodeMZMLNonPhysicalOmitted Code = "MZML_NON_PHYSICAL_METADATA_OMITTED"
 	// CodeMZXMLInstrumentPlaceholder marks an instrument component written as the
 	// literal "Unknown" because mzXML has no way to express absence.
 	CodeMZXMLInstrumentPlaceholder Code = "MZXML_INSTRUMENT_PLACEHOLDER"

@@ -37,7 +37,7 @@ test:
 # verify is the end-to-end gate: build the CLI and run it against synthetic
 # fixtures, including re-open verification of every output.
 verify: build
-	@tmp=$$(mktemp -d); trap 'rm -rf $$tmp' EXIT; $(CGO_FLAGS) $(GO) build -o $$tmp/cdf2ms ./cmd/cdf2ms && $$tmp/cdf2ms fixtures -variant plain,minutes,cdf2,cdf5,packed -manifest $$tmp/fx/manifest.jsonl $$tmp/fx >/dev/null && $$tmp/cdf2ms convert -overwrite -verify -report-jsonl $$tmp/fx/run.jsonl $$tmp/fx >/dev/null && $$tmp/cdf2ms report summarize $$tmp/fx/run.jsonl >/dev/null && echo "verify: OK"
+	@tmp=$$(mktemp -d); trap 'rm -rf $$tmp' EXIT; $(CGO_FLAGS) $(GO) build -o $$tmp/cdf2ms ./cmd/cdf2ms && $$tmp/cdf2ms fixtures -variant plain,minutes,global-units,cdf2,cdf5,packed -manifest $$tmp/fx/manifest.jsonl $$tmp/fx >/dev/null && $$tmp/cdf2ms convert -overwrite -verify -report-jsonl $$tmp/fx/run.jsonl $$tmp/fx >/dev/null && $$tmp/cdf2ms report summarize $$tmp/fx/run.jsonl >/dev/null && echo "verify: OK"
 
 bench:
 	$(CGO_FLAGS) $(GO) test -bench . -benchmem ./pkg/...

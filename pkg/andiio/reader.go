@@ -189,7 +189,7 @@ func (r *Reader) resolveRTUnit() error {
 	if r.layout.TimeValues != nil {
 		tvUnits = r.layout.TimeValues.Units
 	}
-	res, err := ResolveRTUnit(r.opts.RTUnit, r.layout.RT, tvUnits, sample)
+	res, err := ResolveRTUnit(r.opts.RTUnit, r.layout.RT, tvUnits, globalTimeUnits(r.f), sample)
 	if err != nil {
 		// A units attribute we cannot read is a different problem from a file that
 		// states no usable unit at all: the first is malformed, the second merely
@@ -206,6 +206,19 @@ func (r *Reader) resolveRTUnit() error {
 	}
 	r.rtUnit = res.Unit
 	return nil
+}
+
+// globalTimeUnits lifts the file-global attributes that can state a time unit
+// into plain strings, so unit resolution stays a pure function of text and does
+// not need the container.
+func globalTimeUnits(f *netcdfio.File) map[string]string {
+	out := make(map[string]string, len(GlobalTimeUnitKeys))
+	for _, k := range GlobalTimeUnitKeys {
+		if a, ok := f.Globals[k]; ok && a.IsChar {
+			out[k] = a.Str
+		}
+	}
+	return out
 }
 
 // sampleRT reads a bounded, strided sample of acquisition times for the
