@@ -130,6 +130,10 @@ type Writer struct {
 	dpID   string
 	sfID   string
 	sample string
+
+	// noticed keys the per-file diagnostics already recorded, so a sentinel that
+	// repeats on every spectrum does not burn the diagnostic budget per spectrum.
+	noticed map[string]bool
 }
 
 // Create writes the mzML header to path.
@@ -169,7 +173,8 @@ func Create(path string, run *msdata.Run, src msdata.SourceFile, opts Options) (
 		path: path, tmp: tmp, fh: fh, bw: bufio.NewWriterSize(sink, 1<<20), hasher: hasher,
 		opts: opts, run: run, src: src, declared: run.ScanCount, start: time.Now(),
 		swID: xmlID("cdf2ms"), icID: xmlID("IC_1"), dpID: xmlID("cdf2ms_processing"),
-		sfID: xmlID("source_file_1"),
+		sfID:    xmlID("source_file_1"),
+		noticed: map[string]bool{},
 	}
 	if err := w.writeHeader(); err != nil {
 		fh.Close()
@@ -377,6 +382,15 @@ func (w *Writer) Write(sp *msdata.Spectrum) error {
 	b := w.bw
 	fmt.Fprintf(b, "    <spectrum index=\"%d\" id=%q defaultArrayLength=\"%d\">\n",
 		sp.Index, spectrumID(sp), len(sp.MZ))
+	if sp.ScanNumber != nil && *sp.ScanNumber < 0 {
+		w.noticeOnce("scan-number", msdata.Diagnostic{
+			Code: msdata.CodeMZMLScanNumberOmitted,
+			Scan: sp.Index,
+			Message: fmt.Sprintf("source scan number %d is a missing marker, not a scan number; "+
+				"spectrum ids use the index component alone and andi:actual_scan_number is omitted", *sp.ScanNumber),
+			Detail: "first spectrum where it was seen",
+		})
+	}
 
 	level := 1
 	if sp.MSLevel != nil {
@@ -426,13 +440,24 @@ func (w *Writer) Write(sp *msdata.Spectrum) error {
 			Detail:  "source value was absent or a netCDF fill value",
 		})
 	}
+	// Optional ANDI timing metadata is only emitted when it is a measurement. A
+	// negative duration or delay is a missing marker, not a quantity, and
+	// publishing it hands consumers a physically impossible number to plot.
 	if sp.ScanDuration != nil {
-		writeUserParam(b, indent+"    ", "andi:scan_duration_seconds", formatNum(*sp.ScanDuration), "second")
+		if *sp.ScanDuration >= 0 {
+			writeUserParam(b, indent+"    ", "andi:scan_duration_seconds", formatNum(*sp.ScanDuration), "second")
+		} else {
+			w.noticeNonPhysical("scan-duration", "andi:scan_duration_seconds", formatNum(*sp.ScanDuration), sp.Index)
+		}
 	}
 	if sp.InterScanTime != nil {
-		writeUserParam(b, indent+"    ", "andi:inter_scan_delay_seconds", formatNum(*sp.InterScanTime), "second")
+		if *sp.InterScanTime >= 0 {
+			writeUserParam(b, indent+"    ", "andi:inter_scan_delay_seconds", formatNum(*sp.InterScanTime), "second")
+		} else {
+			w.noticeNonPhysical("inter-scan", "andi:inter_scan_delay_seconds", formatNum(*sp.InterScanTime), sp.Index)
+		}
 	}
-	if sp.ScanNumber != nil {
+	if sp.ScanNumber != nil && *sp.ScanNumber >= 0 {
 		writeUserParam(b, indent+"    ", "andi:actual_scan_number", strconv.FormatInt(*sp.ScanNumber, 10), "")
 	}
 	fmt.Fprintf(b, "%s  </scan>\n", indent)
@@ -651,6 +676,33 @@ func (w *Writer) Abort() error {
 // recordWarning keeps writer diagnostics bounded: a pathological file must not
 // turn per-spectrum warnings into unbounded memory growth. The first 64 are
 // kept verbatim; the count of the rest is reported once.
+// noticeNonPhysical reports, once per document, an optional ANDI parameter
+// dropped because its value cannot be a measurement.
+func (w *Writer) noticeNonPhysical(key, param, value string, scan int) {
+	w.noticeOnce(key, msdata.Diagnostic{
+		Code: msdata.CodeMZMLNonPhysicalOmitted,
+		Scan: scan,
+		Message: fmt.Sprintf("%s is %s, which cannot be a measurement; the parameter is omitted "+
+			"instead of published as a value", param, value),
+		Detail: "read as a missing-data marker",
+	})
+}
+
+// noticeOnce records a diagnostic the first time its condition is seen. A
+// sentinel that repeats on every spectrum of a run is one fact about the file,
+// and reporting it once per spectrum would crowd every other diagnostic out of
+// the bounded report.
+func (w *Writer) noticeOnce(key string, d msdata.Diagnostic) {
+	if w.noticed == nil {
+		w.noticed = map[string]bool{}
+	}
+	if w.noticed[key] {
+		return
+	}
+	w.noticed[key] = true
+	w.recordWarning(d)
+}
+
 func (w *Writer) recordWarning(d msdata.Diagnostic) {
 	if len(w.stats.Warnings) < 64 {
 		w.stats.Warnings = append(w.stats.Warnings, d)
@@ -800,7 +852,12 @@ func spectrumID(sp *msdata.Spectrum) string {
 	// index= is always present so IDs stay unique and ordered even when the
 	// source numbers are absent, duplicated, or zero-based (some vendors number
 	// scans from 0); the vendor scan number rides along when it was reported.
-	if sp.ScanNumber != nil {
+	//
+	// A negative number is not a scan number but a missing marker (Agilent writes
+	// -9999 for "undefined"), and consumers parse scan= out of native IDs to join
+	// spectra across files. Publishing scan=-9999 would give every spectrum in the
+	// run the same bogus join key, so the component is dropped instead.
+	if sp.ScanNumber != nil && *sp.ScanNumber >= 0 {
 		return "index=" + strconv.Itoa(sp.Index) + " scan=" + strconv.FormatInt(*sp.ScanNumber, 10)
 	}
 	return "index=" + strconv.Itoa(sp.Index)
