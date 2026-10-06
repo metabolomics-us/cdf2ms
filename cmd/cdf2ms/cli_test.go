@@ -152,6 +152,32 @@ func TestConvertAmbiguousNeedsRTUnitFlag(t *testing.T) {
 	}
 }
 
+// TestConvertGlobalUnitsNeedsNoFlag is the regression for a reported file that
+// would not load: scan_acquisition_time states no unit, the scan spacing fits
+// both clocks, and only the ASTM general-data `units` global says seconds. It
+// must convert under the default policy, with the provenance recorded.
+func TestConvertGlobalUnitsNeedsNoFlag(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, _ := runCLI(t, "fixtures", "-variant", "global-units", dir); code != 0 {
+		t.Fatalf("fixtures exit=%d", code)
+	}
+	src := filepath.Join(dir, "global-units-01.cdf")
+	report := filepath.Join(dir, "run.jsonl")
+	if code, out, errOut := runCLI(t, "convert", "-report-jsonl", report, src); code != 0 {
+		t.Fatalf("global-units convert should exit 0 with no -rt-unit, got %d\n%s\n%s", code, out, errOut)
+	}
+	body, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "ANDI_USED_GLOBAL_TIME_UNIT") {
+		t.Errorf("report should record where the unit came from:\n%s", body)
+	}
+	if strings.Contains(string(body), "ANDI_AMBIGUOUS_UNITS") {
+		t.Errorf("a file that states its unit anywhere is not ambiguous:\n%s", body)
+	}
+}
+
 func TestUnknownCommandAndUsage(t *testing.T) {
 	if code, _, _ := runCLI(t, "frobnicate"); code != 1 {
 		t.Fatalf("unknown command should exit 1, got %d", code)

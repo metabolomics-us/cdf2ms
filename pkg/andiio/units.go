@@ -13,10 +13,12 @@ type RTUnitPolicy string
 
 const (
 	// RTPolicyAuto uses, in order: the variable's own units attribute, the
-	// point-level time_values units attribute, then a decisive magnitude test.
-	// If the magnitude test is not decisive it fails rather than guessing.
+	// point-level time_values units attribute, the file-global time unit, then a
+	// decisive magnitude test. If the magnitude test is not decisive it fails
+	// rather than guessing.
 	RTPolicyAuto RTUnitPolicy = "auto"
-	// RTPolicyStrict requires an explicit units attribute; anything else fails.
+	// RTPolicyStrict requires a unit the source stated outright — per-variable,
+	// point-level, or file-global. Only magnitude inference is forbidden.
 	RTPolicyStrict RTUnitPolicy = "strict"
 	// RTPolicySeconds forces seconds.
 	RTPolicySeconds RTUnitPolicy = "seconds"
@@ -61,6 +63,31 @@ var unitTable = map[string]float64{
 	"m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
 	"h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
 	"ms": 0.001, "msec": 0.001, "millisecond": 0.001, "milliseconds": 0.001,
+}
+
+// GlobalTimeUnitKeys are the file-global attributes that may state the unit of
+// the chromatographic time axis when scan_acquisition_time carries none of its
+// own. ASTM E1482 general data defines `units` for exactly this purpose, and
+// Agilent writes it (as "Seconds") on exports that leave the time variable
+// completely unattributed; `time_units` is the spelling other exporters use.
+// A value that is not a time unit (an m/z or intensity `units`, say) is not
+// accepted, so a file that states an unrelated global unit still refuses to
+// convert rather than being resolved by coincidence.
+var GlobalTimeUnitKeys = []string{"units", "time_units"}
+
+// classifyGlobalTimeUnit finds the first file-global attribute that states a
+// usable time unit.
+func classifyGlobalTimeUnit(globals map[string]string) (key, raw string, scale float64, name string, ok bool) {
+	for _, k := range GlobalTimeUnitKeys {
+		v := globals[k]
+		if v == "" {
+			continue
+		}
+		if s, n, known, _ := classifyUnit(v); known {
+			return k, v, s, n, true
+		}
+	}
+	return "", "", 0, "", false
 }
 
 // ambiguousUnitStrings are units that name a time-like quantity but not a scale
@@ -150,10 +177,13 @@ const (
 // ResolveRTUnit decides the retention-time unit for a file.
 //
 // rtVar is the scan-level acquisition time variable; tvUnits is the units
-// attribute of the point-level time_values variable (may be empty).
-// sample holds a strided sample of acquisition-time values in source units.
-func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, sample []float64) (*RTResolution, error) {
+// attribute of the point-level time_values variable (may be empty). globals
+// holds the file-global attributes that can state a time unit, keyed as in
+// GlobalTimeUnitKeys (may be nil). sample holds a strided sample of
+// acquisition-time values in source units.
+func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, globals map[string]string, sample []float64) (*RTResolution, error) {
 	res := &RTResolution{}
+	gKey, gRaw, gScale, gName, gOK := classifyGlobalTimeUnit(globals)
 
 	// Operator override wins and is recorded as such.
 	switch policy {
@@ -186,6 +216,7 @@ func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, sample []
 					Message: fmt.Sprintf("retention-time units %q interpreted as %g seconds per unit", rtVar.Units, scale),
 				})
 			}
+			noteUnitConflict(res, "scan_acquisition_time.units", rtVar.Units, scale, gKey, gRaw, gScale, gOK)
 			return res, nil
 		} else if msg != "" {
 			if policy == RTPolicyStrict {
@@ -209,8 +240,29 @@ func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, sample []
 				Message: fmt.Sprintf("scan_acquisition_time has no units attribute; inherited %q from "+
 					"time_values.units (%s)", tvUnits, name),
 			})
+			noteUnitConflict(res, "time_values.units", tvUnits, scale, gKey, gRaw, gScale, gOK)
 			return res, nil
 		}
+	}
+
+	// 3. a file-global time unit. This is a statement the exporter made about
+	// this file, not a guess about it, so it is honoured under --rt-unit=strict
+	// and always beats the magnitude test below.
+	if gOK {
+		res.Unit = RTUnit{Name: gName, Scale: gScale, Origin: "global:" + gKey, Confidence: "explicit"}
+		res.Warnings = append(res.Warnings, msdata.Diagnostic{
+			Code: msdata.CodeANDIUsedGlobalTimeUnit,
+			Message: fmt.Sprintf("scan_acquisition_time has no units attribute; inherited %q from the "+
+				"file-global %s attribute (%s)", gRaw, gKey, gName),
+			Detail: "global:" + gKey,
+		})
+		if gScale != 1 && gScale != 60 {
+			res.Warnings = append(res.Warnings, msdata.Diagnostic{
+				Code:    msdata.CodeANDIAmbiguousUnits,
+				Message: fmt.Sprintf("retention-time units %q interpreted as %g seconds per unit", gRaw, gScale),
+			})
+		}
+		return res, nil
 	}
 
 	if policy == RTPolicyStrict {
@@ -218,7 +270,7 @@ func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, sample []
 			"--rt-unit=strict forbids inference", msdata.ErrUnitUndetermined)
 	}
 
-	// 3. decisive magnitude test
+	// 4. decisive magnitude test
 	ev, ok := decideByMagnitude(sample)
 	res.Detail = ev.text()
 	if ok {
@@ -248,6 +300,23 @@ func ResolveRTUnit(policy RTUnitPolicy, rtVar *VarRef, tvUnits string, sample []
 	return nil, fmt.Errorf("%w: scan_acquisition_time has no usable units attribute and the values are "+
 		"not decisive (%s). Re-run with --rt-unit=seconds or --rt-unit=minutes once you have confirmed "+
 		"the acquisition clock for this instrument.", msdata.ErrUnitUndetermined, ev.text())
+}
+
+// noteUnitConflict reports a file that states two different time units and lets
+// the more specific one win. Retention times are only right once, so a silent
+// disagreement between a variable attribute and the file header is worth
+// surfacing even though the resolution rule itself is unambiguous.
+func noteUnitConflict(res *RTResolution, chosenName, chosenRaw string, chosenScale float64, gKey, gRaw string, gScale float64, gOK bool) {
+	if !gOK || gScale == chosenScale {
+		return
+	}
+	res.Warnings = append(res.Warnings, msdata.Diagnostic{
+		Code: msdata.CodeANDIRTUnitConflict,
+		Message: fmt.Sprintf("%s states %q but the file-global %s states %q; using %q as the more "+
+			"specific attribute", chosenName, chosenRaw, gKey, gRaw, chosenRaw),
+		Detail: fmt.Sprintf("chosen=%s (%g s/unit) global=%s:%s (%g s/unit)",
+			chosenRaw, chosenScale, gKey, gRaw, gScale),
+	})
 }
 
 // decideByMagnitude computes the median inter-scan delta and the implied spacing
