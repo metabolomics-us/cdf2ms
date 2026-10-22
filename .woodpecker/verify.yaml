@@ -26,10 +26,12 @@ steps:
       GOCACHE: /tmp/woodpecker-cache/go-build
       CGO_ENABLED: '0'
     commands:
-      - make lint
-      - make test
-      - make verify
-      - make test-release
+      # Restore once into allocation-local scratch; publish after the final
+      # cross-compile so we do not upload the same cache twice.
+      - >-
+        python3 /home/wohlgemuth/woodpecker/runner/bin/wpci-cache
+        run --kind go --phase verify --no-save --
+        bash -ec 'make lint; make test; make verify; make test-release'
 
   - name: cross-compile
     image: bash
@@ -37,7 +39,10 @@ steps:
       GOPATH: /tmp/woodpecker-cache/go
       GOCACHE: /tmp/woodpecker-cache/go-build
     commands:
-      - 'make release VERSION="v0.1.$CI_PIPELINE_NUMBER"'
+      - >-
+        python3 /home/wohlgemuth/woodpecker/runner/bin/wpci-cache
+        run --kind go --phase cross-compile --
+        make release "VERSION=v0.1.$CI_PIPELINE_NUMBER"
 
   - name: publish
     image: bash
