@@ -56,6 +56,18 @@ func fixtureVariants() []fixtureVariant {
 			},
 		},
 		{
+			// The shape a user reported from a production Agilent GC/Q-TOF export:
+			// identical to unitless-ambiguous except for the ASTM general-data
+			// `units` global, which is the only thing that decides the clock.
+			Name:        "global-units",
+			Description: "scan_acquisition_time has no units attribute; the file-global units attribute declares the clock",
+			Expectation: "converts; unit taken from the file-global attribute and recorded as ANDI_USED_GLOBAL_TIME_UNIT",
+			Options: testutil.ANDIOptions{
+				ScanCount: 40, PointsPerScan: []int{200}, RTUnit: "", RTValueScale: 0.2,
+				GlobalAttributes: map[string]string{"dataset_name": "global-units", "units": "Seconds"},
+			},
+		},
+		{
 			Name:        "cdf5",
 			Description: "CDF-5 container with 64-bit widths in the header",
 			Expectation: "converts",

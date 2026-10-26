@@ -625,3 +625,98 @@ func TestWriterRejectsOutOfOrderIndex(t *testing.T) {
 		t.Error("Abort left a document behind")
 	}
 }
+
+// TestSpectrumIDDropsSentinelScanNumber pins the rule that a negative vendor
+// scan number is a missing marker rather than a number: Agilent ANDI writes
+// -9999 for "undefined" on every scan, and consumers join spectra across files
+// on scan= parsed out of the native ID.
+func TestSpectrumIDDropsSentinelScanNumber(t *testing.T) {
+	cases := []struct {
+		name string
+		num  *int64
+		want string
+	}{
+		{"reported", ptrInt64(42), "index=0 scan=42"},
+		{"zero based vendor numbering is kept", ptrInt64(0), "index=0 scan=0"},
+		{"negative sentinel is dropped", ptrInt64(-9999), "index=0"},
+		{"absent", nil, "index=0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := &msdata.Spectrum{Index: 0, ScanNumber: tc.num}
+			if got := spectrumID(sp); got != tc.want {
+				t.Errorf("spectrumID = %q, want %q", got, tc.want)
+			}
+			if !nativeIDPattern.MatchString(spectrumID(sp)) {
+				t.Errorf("id %q violates the native ID pattern", spectrumID(sp))
+			}
+		})
+	}
+}
+
+// TestWriterDropsSentinelMetadata reproduces a reported production file whose
+// actual_scan_number and inter_scan_time are -9999 on all 14,989 scans. Those
+// markers must not reach the document as data, and the fact that they were
+// dropped is reported once for the file, not once per spectrum.
+func TestWriterDropsSentinelMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sentinel.mzML")
+	run := testRun(3)
+	w, err := Create(path, run, run.Source, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		lvl := 1
+		sn := int64(-9999)
+		sp := msdata.Spectrum{
+			Index: i, MZ: []float64{100.5, 200.5}, Intensity: []float64{1000, 2000},
+			RetentionTime: float64(i) * 0.0588, RetentionTimeSet: true,
+			MSLevel: &lvl, ScanNumber: &sn,
+			ScanDuration:  f64(0.0588), // a real measurement: kept
+			InterScanTime: f64(-9999),  // a marker: dropped
+			LowestMZ:      f64(100.5), HighestMZ: f64(200.5), TIC: f64(3000),
+			Polarity: msdata.PolarityPositive, Centroid: msdata.CentroidCentroided,
+		}
+		if err := w.Write(&sp); err != nil {
+			t.Fatalf("Write %d: %v", i, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(body)
+	for _, banned := range []string{"-9999", "andi:inter_scan_delay_seconds", "andi:actual_scan_number"} {
+		if strings.Contains(doc, banned) {
+			t.Errorf("document contains %q; a missing marker was published as data", banned)
+		}
+	}
+	if !strings.Contains(doc, "andi:scan_duration_seconds") {
+		t.Error("a legitimate scan duration was dropped along with the sentinels")
+	}
+
+	p := parseMzML(t, path)
+	if len(p.spectra) != 3 {
+		t.Fatalf("spectra = %d, want 3", len(p.spectra))
+	}
+	for _, s := range p.spectra {
+		if strings.Contains(s.id, "scan=") {
+			t.Errorf("spectrum id %q carries a sentinel scan number", s.id)
+		}
+	}
+
+	counts := map[msdata.Code]int{}
+	for _, d := range w.Stats().Warnings {
+		counts[d.Code]++
+	}
+	if counts[msdata.CodeMZMLScanNumberOmitted] != 1 {
+		t.Errorf("%s recorded %d times, want 1 for the file", msdata.CodeMZMLScanNumberOmitted, counts[msdata.CodeMZMLScanNumberOmitted])
+	}
+	if counts[msdata.CodeMZMLNonPhysicalOmitted] != 1 {
+		t.Errorf("%s recorded %d times, want 1 for the file", msdata.CodeMZMLNonPhysicalOmitted, counts[msdata.CodeMZMLNonPhysicalOmitted])
+	}
+}
